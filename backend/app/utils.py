@@ -109,8 +109,8 @@ def get_midi_devices() -> list[dict]:
 
 
 def run_score_following(file_id: str, input_type: str, device: str) -> None:
-    score_midi = find_score_file_by_id(file_id)  # .mid
-    score_part = partitura.load_score_as_part(str(score_midi))
+    score_midi = str(find_score_file_by_id(file_id))  # .mid
+    score_part = partitura.load_score_as_part(score_midi)
     print(f"Running score following with {score_midi}")
 
     # performance 파일 찾기
