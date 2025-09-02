@@ -134,14 +134,14 @@ const IndexPage: React.FC = () => {
         await osmd.current.render();
 
         cursor.current = osmd.current.cursor;
-        console.log('Cursor initialized:', cursor.current); // 디버깅용
+        console.log('Cursor initialized:', cursor.current);
 
         registerNoteFromOsmd(osmd.current);
 
         if (cursor.current) {
           cursor.current.reset();
           cursor.current.show();
-          console.log('Cursor position after reset:', cursor.current.Iterator.currentTimeStamp.RealValue); // 디버깅용
+          console.log('Cursor position after reset:', cursor.current.Iterator.currentTimeStamp.RealValue);
         }
       }
       
@@ -167,7 +167,9 @@ const IndexPage: React.FC = () => {
 
     ws.current.onopen = () => {
       console.log('WebSocket connection opened');
-      const input_type = performanceFile?.type.includes('midi') ? 'midi' : 'audio';
+      const input_type = performanceFile 
+        ? (performanceFile.type.includes('midi') ? 'midi' : 'audio')
+        : (inputType === 'MIDI' ? 'midi' : 'audio');
       
       ws.current?.send(JSON.stringify({ 
         file_id: fileId.current,
