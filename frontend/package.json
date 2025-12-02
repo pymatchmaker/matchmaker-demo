@@ -11,7 +11,7 @@
   "dependencies": {
     "@nextui-org/react": "^2.4.8",
     "@types/verovio": "^5.1.0",
-    "next": "^15.0.1",
+    "next": ">=15.4.7",
     "opensheetmusicdisplay": "^1.8.9",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -23,7 +23,7 @@
     "@types/react": "18.3.12",
     "autoprefixer": "^10.4.20",
     "eslint": "^9.13.0",
-    "eslint-config-next": "^15.0.1",
+    "eslint-config-next": ">=15.4.7",
     "postcss": "^8.5.1",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.6.3"
