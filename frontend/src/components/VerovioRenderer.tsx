@@ -55,6 +55,7 @@ export class VerovioRendererImpl implements ScoreRenderer {
   private onNotesRegistered?: (notes: NoteInfo[], timeIndexMap: { [key: number]: number }) => void;
   private initialized: boolean = false;
   private beatToXPosition: Map<number, number> = new Map(); // beat -> x position mapping
+  private quarterToXPosition: Map<number, number> = new Map(); // quarter_position -> x position mapping
 
   constructor(container: HTMLDivElement, onNotesRegistered?: (notes: NoteInfo[], timeIndexMap: { [key: number]: number }) => void) {
     this.container = container;
@@ -126,53 +127,145 @@ export class VerovioRendererImpl implements ScoreRenderer {
     if (!this.toolkit || !this.container) return;
 
     this.beatToXPosition.clear();
+    this.quarterToXPosition.clear();
     
     try {
       // Verovio의 renderToTimemap을 사용하여 시간 정보 추출
       const timeMap = this.toolkit.renderToTimemap({
         includeMeasures: true,
-        includeRests: false
+        includeRests: true
       });
       
       // SVG에서 각 시간에 해당하는 요소의 X 좌표 찾기
       const svg = this.container.querySelector('svg');
       if (!svg) return;
       
-      // SVG의 모든 note 요소 찾기
-      const noteElements = svg.querySelectorAll('[data-id], note, g[class*="note"]');
+      // 첫 번째 entry를 로깅하여 구조 확인
+      if (timeMap.length > 0) {
+        console.log('Sample timemap entry:', JSON.stringify(timeMap[0], null, 2));
+      }
       
       timeMap.forEach((entry: any) => {
         if (entry.qstamp !== undefined) {
-          const beat = entry.qstamp * 4; // quarter note를 beat로 변환
+          const quarterPosition = entry.qstamp; // qstamp는 quarter note 단위
+          const beat = quarterPosition * 4; // beat로 변환 (호환성 유지)
+          
+          let foundX: number | null = null;
           
           // 해당 시간의 노트 요소 찾기
-          // Verovio SVG 구조에 따라 조정 필요
-          // 일단 첫 번째 노트의 X 좌표를 사용
           if (entry.on && entry.on.length > 0) {
             const noteId = entry.on[0];
-            const noteElement = svg.querySelector(`[data-id="${noteId}"]`) || 
-                              svg.querySelector(`#${noteId}`);
+            // Verovio SVG에서 요소 찾기 (여러 방법 시도)
+            // Verovio는 보통 data-id 속성을 사용하거나, xml:id를 id로 변환
+            let noteElement = svg.querySelector(`[data-id="${noteId}"]`) || 
+                             svg.querySelector(`#${noteId}`) ||
+                             svg.querySelector(`[id="${noteId}"]`);
+            
+            // SVG 내부의 g 요소나 use 요소도 확인
+            if (!noteElement) {
+              const allElements = svg.querySelectorAll('*');
+              for (const el of allElements) {
+                const elId = el.getAttribute('data-id') || el.getAttribute('id') || el.id;
+                if (elId === noteId) {
+                  noteElement = el;
+                  break;
+                }
+              }
+            }
             
             if (noteElement && 'getBBox' in noteElement) {
-              const svgElement = noteElement as SVGGraphicsElement;
-              const bbox = svgElement.getBBox();
-              this.beatToXPosition.set(beat, bbox.x);
+              try {
+                const svgElement = noteElement as SVGGraphicsElement;
+                const bbox = svgElement.getBBox();
+                foundX = bbox.x;
+              } catch (e) {
+                // getBBox 실패 시 무시
+                console.debug(`Could not get bbox for note ${noteId}:`, e);
+              }
             }
+          }
+          
+          // measure 정보도 사용 (더 정확한 위치 추적)
+          // Verovio의 timemap entry에는 measure 정보가 포함될 수 있음
+          if (foundX === null) {
+            const measureId = entry.measureId || entry.m || entry.measure;
+            if (measureId) {
+              // measure 요소 찾기 (여러 패턴 시도)
+              const measureSelectors = [
+                `[data-id*="measure-${measureId}"]`,
+                `[id*="measure-${measureId}"]`,
+                `g[class*="measure-${measureId}"]`,
+                `[data-id="${measureId}"]`,
+                `#${measureId}`
+              ];
+              
+              for (const selector of measureSelectors) {
+                const measureElement = svg.querySelector(selector);
+                if (measureElement && 'getBBox' in measureElement) {
+                  try {
+                    const svgElement = measureElement as SVGGraphicsElement;
+                    const bbox = svgElement.getBBox();
+                    foundX = bbox.x;
+                    break;
+                  } catch (e) {
+                    console.debug(`Could not get bbox for measure ${measureId} with selector ${selector}:`, e);
+                  }
+                }
+              }
+            }
+          }
+          
+          // tstamp를 사용하여 measure 내 위치 계산
+          if (foundX === null && entry.tstamp !== undefined) {
+            // measure의 시작 위치를 찾고, tstamp를 사용하여 보간
+            const measureId = entry.measureId || entry.m || entry.measure;
+            if (measureId) {
+              const measureElement = svg.querySelector(`[data-id*="measure"], [id*="measure"]`);
+              if (measureElement && 'getBBox' in measureElement) {
+                try {
+                  const svgElement = measureElement as SVGGraphicsElement;
+                  const bbox = svgElement.getBBox();
+                  foundX = bbox.x;
+                } catch (e) {
+                  console.debug(`Could not get bbox for measure:`, e);
+                }
+              }
+            }
+          }
+          
+          // 찾은 X 위치를 매핑에 저장
+          if (foundX !== null) {
+            this.quarterToXPosition.set(quarterPosition, foundX);
+            this.beatToXPosition.set(beat, foundX);
           }
         }
       });
       
       // 노트가 없는 경우, SVG의 measure 요소를 사용하여 대략적인 위치 계산
-      if (this.beatToXPosition.size === 0) {
-        const measures = svg.querySelectorAll('[data-id*="measure"], g[class*="measure"]');
+      if (this.quarterToXPosition.size === 0) {
+        const measures = svg.querySelectorAll('[data-id*="measure"], g[class*="measure"], g[data-id]');
         measures.forEach((measure, index) => {
           if ('getBBox' in measure) {
-            const svgElement = measure as SVGGraphicsElement;
-            const bbox = svgElement.getBBox();
-            const beat = index * 4; // 각 measure를 4 beat로 가정
-            this.beatToXPosition.set(beat, bbox.x);
+            try {
+              const svgElement = measure as SVGGraphicsElement;
+              const bbox = svgElement.getBBox();
+              const quarterPos = index * 4; // 각 measure를 4 quarter로 가정
+              const beat = quarterPos * 4;
+              this.quarterToXPosition.set(quarterPos, bbox.x);
+              this.beatToXPosition.set(beat, bbox.x);
+            } catch (e) {
+              console.debug(`Could not get bbox for measure ${index}:`, e);
+            }
           }
         });
+      }
+      
+      console.log(`Built position map: ${this.quarterToXPosition.size} quarter positions, ${this.beatToXPosition.size} beat positions`);
+      
+      // 디버깅: 첫 몇 개의 매핑 출력
+      if (this.quarterToXPosition.size > 0) {
+        const sampleQuarters = Array.from(this.quarterToXPosition.entries()).slice(0, 5);
+        console.log('Sample quarter position mappings:', sampleQuarters);
       }
       
     } catch (error) {
@@ -192,6 +285,33 @@ export class VerovioRendererImpl implements ScoreRenderer {
     
     if (closestBeat !== undefined && this.beatToXPosition.has(closestBeat)) {
       return this.beatToXPosition.get(closestBeat)!;
+    }
+    
+    return null;
+  }
+
+  private getXPositionForQuarter(quarterPosition: number): number | null {
+    // 정확한 quarter 위치 찾기
+    if (this.quarterToXPosition.has(quarterPosition)) {
+      return this.quarterToXPosition.get(quarterPosition)!;
+    }
+    
+    // 가장 가까운 quarter 위치 찾기
+    const quarters = Array.from(this.quarterToXPosition.keys()).sort((a, b) => a - b);
+    const closestQuarter = quarters.findLast((q) => q <= quarterPosition) || quarters[0];
+    
+    if (closestQuarter !== undefined && this.quarterToXPosition.has(closestQuarter)) {
+      const baseX = this.quarterToXPosition.get(closestQuarter)!;
+      
+      // 다음 quarter 위치를 찾아서 보간
+      const nextQuarter = quarters.find((q) => q > quarterPosition);
+      if (nextQuarter !== undefined && this.quarterToXPosition.has(nextQuarter)) {
+        const nextX = this.quarterToXPosition.get(nextQuarter)!;
+        const ratio = (quarterPosition - closestQuarter) / (nextQuarter - closestQuarter);
+        return baseX + (nextX - baseX) * ratio;
+      }
+      
+      return baseX;
     }
     
     return null;
@@ -367,6 +487,7 @@ export class VerovioRendererImpl implements ScoreRenderer {
 
   moveToPosition(targetBeat: number): void {
     this.currentBeat = targetBeat;
+    // targetBeat가 실제로는 quarter_position일 수 있으므로 둘 다 시도
     this.highlightPosition(targetBeat);
   }
 
@@ -380,10 +501,33 @@ export class VerovioRendererImpl implements ScoreRenderer {
     const svg = this.container.querySelector('svg');
     if (!svg) return;
 
-    const xPosition = this.getXPositionForBeat(beat);
+    // 서버에서 보내는 값은 quarter_position이지만, JSON 키는 "beat_position"
+    // Verovio의 qstamp는 quarter note 단위이므로, 받은 값을 quarter_position으로 처리
+    let xPosition: number | null = null;
+    
+    // quarter_position으로 직접 매핑 시도 (서버에서 보내는 값이 quarter_position이므로)
+    if (this.quarterToXPosition.size > 0) {
+      xPosition = this.getXPositionForQuarter(beat);
+      if (xPosition !== null) {
+        console.debug(`Found X position for quarter_position ${beat}: ${xPosition}`);
+      }
+    }
+    
+    // 실패하면 beat로 시도 (호환성 유지)
+    if (xPosition === null) {
+      xPosition = this.getXPositionForBeat(beat);
+      if (xPosition !== null) {
+        console.debug(`Found X position for beat ${beat}: ${xPosition}`);
+      }
+    }
     
     if (xPosition === null) {
-      console.warn(`Could not find X position for beat: ${beat}`);
+      console.warn(`Could not find X position for beat/quarter: ${beat}`, {
+        quarterMapSize: this.quarterToXPosition.size,
+        beatMapSize: this.beatToXPosition.size,
+        quarterKeys: Array.from(this.quarterToXPosition.keys()).slice(0, 10),
+        beatKeys: Array.from(this.beatToXPosition.keys()).slice(0, 10)
+      });
       return;
     }
 
