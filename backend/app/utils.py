@@ -27,7 +27,8 @@ def preprocess_score(score_xml: Path) -> None:
     score_xml : Path
         Path to the score xml file
     """
-    score_obj = partitura.load_musicxml(score_xml)
+    # score_obj = partitura.load_musicxml(score_xml)
+    score_obj = partitura.load_score_as_part(str(score_xml))
 
     score_midi_path = f"./uploads/{score_xml.stem}.mid"
     partitura.save_score_midi(score_obj, score_midi_path)

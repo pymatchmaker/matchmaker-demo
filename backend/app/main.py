@@ -89,7 +89,7 @@ async def upload_file(
             shutil.copyfileobj(performance_file.file, buffer)
         print(f"Performance file saved: {performance_path}")
 
-    preprocess_score(file_path)
+    # preprocess_score(file_path)
     return {"file_id": file_id}
 
 

@@ -10,11 +10,13 @@
   },
   "dependencies": {
     "@nextui-org/react": "^2.4.8",
+    "@types/verovio": "^5.1.0",
     "next": "^15.0.1",
     "opensheetmusicdisplay": "^1.8.9",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-h5-audio-player": "^3.9.3"
+    "react-h5-audio-player": "^3.9.3",
+    "verovio": "^5.6.0"
   },
   "devDependencies": {
     "@types/node": "22.7.9",

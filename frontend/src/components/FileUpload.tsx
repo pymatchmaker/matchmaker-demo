@@ -8,6 +8,7 @@ interface FileUploadProps {
     file_content: string;
     hasPerformanceFile: boolean;
     performanceFile?: File;
+    fileName?: string;
   }) => void;
 }
 
@@ -58,7 +59,8 @@ const FileUpload: React.FC<FileUploadProps> = ({ backendUrl, onFileUpload }) => 
         file_id: data.file_id,
         file_content: fileContent,
         hasPerformanceFile: !!audioFile,
-        performanceFile: audioFile || undefined
+        performanceFile: audioFile || undefined,
+        fileName: scoreFile.name
       });
 
     } catch (error) {
@@ -89,7 +91,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ backendUrl, onFileUpload }) => 
           if (file) setScoreFile(file);
         }}
       >
-        <div className="text-lg font-semibold mb-2 text-gray-700">Sheet Music Score (MusicXML)</div>
+        <div className="text-lg font-semibold mb-2 text-gray-700">Sheet Music Score (MusicXML or MEI)</div>
         <p className="text-sm text-gray-500 mb-4">
           Drag and drop your score file here, or click to select
         </p>
@@ -102,7 +104,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ backendUrl, onFileUpload }) => 
         <input
           ref={scoreInputRef}
           type="file"
-          accept=".xml,.musicxml"
+          accept=".xml,.musicxml,.mei"
           onChange={(e) => e.target.files?.[0] && setScoreFile(e.target.files[0])}
           className="hidden"
         />

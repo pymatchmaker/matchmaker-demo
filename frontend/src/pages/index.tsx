@@ -2,16 +2,19 @@ import React, { useState, useRef, useEffect } from 'react';
 import Head from 'next/head';
 import FileUpload from '../components/FileUpload';
 import CustomAudioPlayer from '../components/AudioPlayer';
-import { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
 import { AudioPlayerRef } from '../components/AudioPlayer';
+import { ScoreRenderer, detectScoreFormat, detectScoreFormatFromContent, ScoreFormat } from '../utils/scoreRenderer';
+import { OSMDRendererImpl } from '../components/OSMDRenderer';
+import { VerovioRendererImpl } from '../components/VerovioRenderer';
 
 const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
 
 interface FileUploadData {
   file_id: string;
-  onset_beats: number[];
   file_content: string;
   hasPerformanceFile: boolean;
+  fileName?: string;
+  onset_beats?: number[];
 }
 
 const IndexPage: React.FC = () => {
@@ -20,13 +23,12 @@ const IndexPage: React.FC = () => {
   const [isFileUploaded, setIsFileUploaded] = useState(false);
   const [anchorPositionIndex, setAnchorPositionIndex] = useState<number>(0);
   const [realTimePosition, setRealTimePosition] = useState<number>(0);
-  const [inputType, setInputType] = useState<'MIDI' | 'Audio'>('');
-  const [audioDevices, setAudioDevices] = useState<string[]>([]);
+  const [inputType, setInputType] = useState<'MIDI' | 'Audio' | ''>('');
+  const [audioDevices, setAudioDevices] = useState<Array<{ index: number; name: string }>>([]);
   const [selectedAudioDevice, setSelectedAudioDevice] = useState<string>('');
-  const [midiDevices, setMidiDevices] = useState<string[]>([]);
+  const [midiDevices, setMidiDevices] = useState<Array<{ index: number; name: string }>>([]);
   const [selectedMidiDevice, setSelectedMidiDevice] = useState<string>('');
-  const osmd = useRef<OpenSheetMusicDisplay | null>(null);
-  const cursor = useRef<any>(null);
+  const scoreRenderer = useRef<ScoreRenderer | null>(null);
   const ws = useRef<WebSocket | null>(null);
   const onsetBeats = useRef<number[] | null>([]);
   const fileId = useRef<string | null>(null);
@@ -36,6 +38,7 @@ const IndexPage: React.FC = () => {
   const [performanceFile, setPerformanceFile] = useState<File | null>(null);
   const audioPlayerRef = useRef<AudioPlayerRef>(null);
   const scoreContainerRef = useRef<HTMLDivElement>(null);
+  const [scoreFormat, setScoreFormat] = useState<ScoreFormat>('unknown');
 
   useEffect(() => {
     if (inputType === 'Audio') {
@@ -56,12 +59,7 @@ const IndexPage: React.FC = () => {
     }
   }, [realTimePosition]);
 
-  useEffect(() => {
-    if (vfRef.current) {
-      osmd.current = new OpenSheetMusicDisplay(vfRef.current);
-      console.log('OSMD initialized');
-    }
-  }, []);
+  // 렌더러 초기화는 파일 업로드 시점에 수행
 
 
   const logWithTimestamp = (message: string) => {
@@ -70,45 +68,9 @@ const IndexPage: React.FC = () => {
     console.log(`[${timestamp}] ${message}`);
   };
 
-  const registerNoteFromOsmd = (osmd: OpenSheetMusicDisplay) => {
-    if (osmd && osmd.cursor) {
-      let iterator = osmd.cursor.Iterator;
-
-      var allNotes = [];
-      var allNotesWRest = [];
-
-      while (!iterator.EndReached) {
-        const voices = iterator.CurrentVoiceEntries;
-        for (var i = 0; i < voices.length; i++) {
-          const v = voices[i];
-          const notes = v.Notes;
-          for (var j = 0; j < notes.length; j++) {
-            const note = notes[j];
-            if (note != null) {
-              allNotesWRest.push({
-                note: note.halfTone + 12,
-                time: iterator.currentTimeStamp.RealValue * 4,
-                length: note.Length.RealValue,
-              });
-            }
-          }
-        }
-        iterator.moveToNext();
-      }
-
-      const uniqueNotesWRestArray: { note: number; time: number; length: number }[] = [];
-      const timeIndexMapObj: { [key: number]: number } = {};
-      allNotesWRest.forEach((note, index) => {
-        if (!timeIndexMapObj.hasOwnProperty(note.time)) {
-          uniqueNotesWRestArray.push(note);
-          timeIndexMapObj[note.time] = uniqueNotesWRestArray.length - 1;
-        }
-      });
-
-      uniqueNotesWRest.current = uniqueNotesWRestArray;
-      timeIndexMap.current = timeIndexMapObj;
-      cursor.current = osmd.cursor;
-    }
+  const registerNotesFromRenderer = (notes: any[], timeIndexMapObj: { [key: number]: number }) => {
+    uniqueNotesWRest.current = notes;
+    timeIndexMap.current = timeIndexMapObj;
   };
 
   const onFileUpload = async (data: { 
@@ -116,6 +78,7 @@ const IndexPage: React.FC = () => {
     file_content: string;
     hasPerformanceFile: boolean;
     performanceFile?: File;
+    fileName?: string;
   }) => {
     fileId.current = data.file_id;
     if (data.performanceFile && data.performanceFile instanceof File) {
@@ -126,24 +89,47 @@ const IndexPage: React.FC = () => {
       console.log('Performance file exists:', data.hasPerformanceFile);
       setIsSimulationMode(data.hasPerformanceFile);
       
-      onsetBeats.current = data.onset_beats;
+      // onset_beats는 서버에서 제공되지 않을 수 있으므로 옵셔널로 처리
+      // onsetBeats.current = data.onset_beats || [];
 
-      if (vfRef.current) {
-        osmd.current = new OpenSheetMusicDisplay(vfRef.current);
-        await osmd.current.load(data.file_content);
-        await osmd.current.render();
-
-        cursor.current = osmd.current.cursor;
-        console.log('Cursor initialized:', cursor.current);
-
-        registerNoteFromOsmd(osmd.current);
-
-        if (cursor.current) {
-          cursor.current.reset();
-          cursor.current.show();
-          console.log('Cursor position after reset:', cursor.current.Iterator.currentTimeStamp.RealValue);
-        }
+      if (!vfRef.current) {
+        console.error('Container ref not available');
+        return;
       }
+
+      // 파일 형식 감지
+      let format: ScoreFormat = 'unknown';
+      if (data.fileName) {
+        format = detectScoreFormat(data.fileName);
+      }
+      if (format === 'unknown') {
+        format = detectScoreFormatFromContent(data.file_content);
+      }
+      setScoreFormat(format);
+
+      console.log('Detected score format:', format);
+
+      // 형식에 따라 적절한 렌더러 선택
+      if (format === 'mei') {
+        scoreRenderer.current = new VerovioRendererImpl(
+          vfRef.current,
+          registerNotesFromRenderer
+        );
+      } else {
+        // MusicXML 또는 기본값은 OSMD 사용
+        scoreRenderer.current = new OSMDRendererImpl(
+          vfRef.current,
+          registerNotesFromRenderer
+        );
+      }
+
+      // 파일 로드 및 렌더링
+      await scoreRenderer.current.load(data.file_content);
+      await scoreRenderer.current.render();
+
+      // 초기화
+      scoreRenderer.current.reset();
+      scoreRenderer.current.show();
       
       setIsFileUploaded(true);
     } catch (error) {
@@ -152,7 +138,7 @@ const IndexPage: React.FC = () => {
   };
 
   const playMusic = async () => {
-    if (!cursor.current || !fileId.current) return;
+    if (!scoreRenderer.current || !fileId.current) return;
     
     setIsPlaying(true);
     if (performanceFile) {
@@ -160,7 +146,7 @@ const IndexPage: React.FC = () => {
     }
 
     console.log('Starting music playback...');
-    cursor.current.reset();
+    scoreRenderer.current.reset();
 
     const wsUrl = `${backendUrl.replace(/^http/, 'ws')}/ws`;
     ws.current = new WebSocket(wsUrl);
@@ -208,49 +194,15 @@ const IndexPage: React.FC = () => {
 
   const moveToTargetBeat = (targetBeat: number) => {
     logWithTimestamp(`Moving to target beat: ${targetBeat}`);
-    if (!osmd.current) return;
+    if (!scoreRenderer.current) return;
     
-    cursor.current = osmd.current.cursor;
-    
-    if (cursor.current) {
-      const currentBeat = getCursorCurrentPosition();
-      const currentIndex = timeIndexMap.current[currentBeat];
-      let targetIndex = timeIndexMap.current[targetBeat];
-
-      if (currentIndex === undefined) {
-        logWithTimestamp(`Invalid current beat position. Cursor's current beat: ${currentBeat}`);
-        return;
-      }
-
-      if (targetIndex === undefined) {
-        const onsetBeats = Object.keys(timeIndexMap.current).map(Number).sort((a, b) => a - b);
-        const closestIndex = findClosestIndex(onsetBeats, targetBeat);
-        targetIndex = timeIndexMap.current[onsetBeats[closestIndex]];
-        logWithTimestamp(`Closest target index found: ${targetIndex}`);
-      }
-
-      const steps = targetIndex - currentIndex;
-      logWithTimestamp(`Steps to move: ${steps}`);
-
-      if (steps > 0) {
-        for (let i = 0; i < steps; i++) {
-          cursor.current.next();
-        }
-      } else if (steps < 0) {
-        for (let i = 0; i < Math.abs(steps); i++) {
-          cursor.current.previous();
-        }
-      }
-
-      osmd.current.cursor.update();
-      cursor.current.show();
-    }
+    scoreRenderer.current.moveToPosition(targetBeat);
   };
 
   const stopMusic = () => {
     console.log('Stopping music');
-    if (cursor.current) {
-      cursor.current.hide();
+    if (scoreRenderer.current) {
+      scoreRenderer.current.hide();
     }
     setIsPlaying(false);
     if (ws.current) {
@@ -258,13 +210,6 @@ const IndexPage: React.FC = () => {
       ws.current = null;
       console.log('WebSocket connection closed');
     }
-  };
-
-  const getCursorCurrentPosition = () => {
-    if (cursor.current && cursor.current.Iterator) {
-      return cursor.current.Iterator.currentTimeStamp.RealValue * 4;
-    }
-    return 0;
   };
 
   const fetchAudioDevices = async () => {
