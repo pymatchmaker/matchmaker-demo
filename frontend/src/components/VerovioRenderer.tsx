@@ -51,8 +51,10 @@ export class VerovioRendererImpl implements ScoreRenderer {
   private timeIndexMap: { [key: number]: number } = {};
   private currentBeat: number = 0;
   private highlightElement: SVGElement | null = null;
+  private cursorLine: SVGLineElement | null = null;
   private onNotesRegistered?: (notes: NoteInfo[], timeIndexMap: { [key: number]: number }) => void;
   private initialized: boolean = false;
+  private beatToXPosition: Map<number, number> = new Map(); // beat -> x position mapping
 
   constructor(container: HTMLDivElement, onNotesRegistered?: (notes: NoteInfo[], timeIndexMap: { [key: number]: number }) => void) {
     this.container = container;
@@ -111,10 +113,88 @@ export class VerovioRendererImpl implements ScoreRenderer {
     // 노트 정보 추출
     this.extractNotes();
     
+    // 시간-위치 매핑 생성
+    this.buildBeatToPositionMap();
+    
     // 노트 정보 등록 콜백 호출
     if (this.onNotesRegistered) {
       this.onNotesRegistered(this.notes, this.timeIndexMap);
     }
+  }
+
+  private buildBeatToPositionMap(): void {
+    if (!this.toolkit || !this.container) return;
+
+    this.beatToXPosition.clear();
+    
+    try {
+      // Verovio의 renderToTimemap을 사용하여 시간 정보 추출
+      const timeMap = this.toolkit.renderToTimemap({
+        includeMeasures: true,
+        includeRests: false
+      });
+      
+      // SVG에서 각 시간에 해당하는 요소의 X 좌표 찾기
+      const svg = this.container.querySelector('svg');
+      if (!svg) return;
+      
+      // SVG의 모든 note 요소 찾기
+      const noteElements = svg.querySelectorAll('[data-id], note, g[class*="note"]');
+      
+      timeMap.forEach((entry: any) => {
+        if (entry.qstamp !== undefined) {
+          const beat = entry.qstamp * 4; // quarter note를 beat로 변환
+          
+          // 해당 시간의 노트 요소 찾기
+          // Verovio SVG 구조에 따라 조정 필요
+          // 일단 첫 번째 노트의 X 좌표를 사용
+          if (entry.on && entry.on.length > 0) {
+            const noteId = entry.on[0];
+            const noteElement = svg.querySelector(`[data-id="${noteId}"]`) || 
+                              svg.querySelector(`#${noteId}`);
+            
+            if (noteElement && 'getBBox' in noteElement) {
+              const svgElement = noteElement as SVGGraphicsElement;
+              const bbox = svgElement.getBBox();
+              this.beatToXPosition.set(beat, bbox.x);
+            }
+          }
+        }
+      });
+      
+      // 노트가 없는 경우, SVG의 measure 요소를 사용하여 대략적인 위치 계산
+      if (this.beatToXPosition.size === 0) {
+        const measures = svg.querySelectorAll('[data-id*="measure"], g[class*="measure"]');
+        measures.forEach((measure, index) => {
+          if ('getBBox' in measure) {
+            const svgElement = measure as SVGGraphicsElement;
+            const bbox = svgElement.getBBox();
+            const beat = index * 4; // 각 measure를 4 beat로 가정
+            this.beatToXPosition.set(beat, bbox.x);
+          }
+        });
+      }
+      
+    } catch (error) {
+      console.error('Error building beat to position map:', error);
+    }
+  }
+
+  private getXPositionForBeat(beat: number): number | null {
+    // 정확한 beat 위치 찾기
+    if (this.beatToXPosition.has(beat)) {
+      return this.beatToXPosition.get(beat)!;
+    }
+    
+    // 가장 가까운 beat 위치 찾기
+    const beats = Array.from(this.beatToXPosition.keys()).sort((a, b) => a - b);
+    const closestBeat = beats.findLast((b) => b <= beat) || beats[0];
+    
+    if (closestBeat !== undefined && this.beatToXPosition.has(closestBeat)) {
+      return this.beatToXPosition.get(closestBeat)!;
+    }
+    
+    return null;
   }
 
   private extractNotes(): void {
@@ -293,43 +373,62 @@ export class VerovioRendererImpl implements ScoreRenderer {
   highlightPosition(beat: number): void {
     if (!this.container) return;
 
-    // 기존 하이라이트 제거
-    this.removeHighlight();
+    // 기존 cursor 제거
+    this.removeCursor();
 
-    // SVG에서 해당 beat 위치의 요소 찾기 및 하이라이트
+    // SVG에서 해당 beat 위치의 X 좌표 찾기
     const svg = this.container.querySelector('svg');
     if (!svg) return;
 
-    // Verovio SVG에서 해당 시간의 요소를 찾기
-    // Verovio는 요소에 data-id나 다른 속성을 사용할 수 있음
-    // 여기서는 간단하게 모든 note 요소에 하이라이트 스타일 적용 시도
+    const xPosition = this.getXPositionForBeat(beat);
     
-    // 더 정교한 방법: SVG의 모든 note 요소를 찾아서 시간에 맞는 것만 하이라이트
-    // 하지만 Verovio의 SVG 구조에 따라 다를 수 있으므로
-    // 일단 간단한 수평선으로 표시
+    if (xPosition === null) {
+      console.warn(`Could not find X position for beat: ${beat}`);
+      return;
+    }
+
+    // SVG의 전체 높이 가져오기
+    const svgRect = svg.viewBox?.baseVal || svg.getBBox();
+    const svgHeight = svgRect.height || 3000;
+    const svgWidth = svgRect.width || 2000;
+
+    // OSMD 스타일의 수직 cursor bar 생성
+    const cursorLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    cursorLine.setAttribute('x1', xPosition.toString());
+    cursorLine.setAttribute('y1', '0');
+    cursorLine.setAttribute('x2', xPosition.toString());
+    cursorLine.setAttribute('y2', svgHeight.toString());
+    cursorLine.setAttribute('stroke', '#33aa33'); // OSMD와 유사한 녹색
+    cursorLine.setAttribute('stroke-width', '3');
+    cursorLine.setAttribute('opacity', '0.8');
+    cursorLine.setAttribute('class', 'verovio-cursor');
+    cursorLine.style.pointerEvents = 'none';
+    cursorLine.style.zIndex = '1000';
     
-    const svgRect = svg.viewBox?.baseVal || { width: 2000, height: 3000 };
-    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    rect.setAttribute('x', '0');
-    rect.setAttribute('y', '50'); // Y 위치는 스크롤 위치에 따라 조정 필요
-    rect.setAttribute('width', svgRect.width.toString());
-    rect.setAttribute('height', '3');
-    rect.setAttribute('fill', '#ff0000');
-    rect.setAttribute('opacity', '0.6');
-    rect.setAttribute('class', 'verovio-highlight');
-    rect.style.pointerEvents = 'none';
+    // SVG의 최상위 레이어에 추가 (다른 요소 위에 표시)
+    const defs = svg.querySelector('defs') || document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+    if (!svg.querySelector('defs')) {
+      svg.insertBefore(defs, svg.firstChild);
+    }
     
-    svg.appendChild(rect);
-    this.highlightElement = rect;
+    // cursor를 SVG의 마지막에 추가하여 위에 표시
+    svg.appendChild(cursorLine);
+    this.cursorLine = cursorLine;
     
-    // 스크롤하여 하이라이트 위치로 이동
-    const highlightY = 50;
-    if (this.container.parentElement) {
-      this.container.parentElement.scrollTop = highlightY - 100;
+    // 스크롤하여 cursor 위치로 이동
+    const containerRect = this.container.getBoundingClientRect();
+    const scrollContainer = this.container.parentElement;
+    if (scrollContainer) {
+      const scrollX = xPosition - containerRect.width / 2;
+      scrollContainer.scrollLeft = Math.max(0, scrollX);
     }
   }
 
-  private removeHighlight(): void {
+  private removeCursor(): void {
+    if (this.cursorLine) {
+      this.cursorLine.remove();
+      this.cursorLine = null;
+    }
     if (this.highlightElement) {
       this.highlightElement.remove();
       this.highlightElement = null;
@@ -342,18 +441,18 @@ export class VerovioRendererImpl implements ScoreRenderer {
 
   reset(): void {
     this.currentBeat = 0;
-    if (this.highlightElement) {
-      this.highlightElement.remove();
-      this.highlightElement = null;
-    }
+    this.removeCursor();
   }
 
   show(): void {
-    // Verovio는 항상 표시되므로 특별한 작업 없음
+    // cursor가 이미 표시되어 있으면 유지
+    if (this.currentBeat > 0) {
+      this.highlightPosition(this.currentBeat);
+    }
   }
 
   hide(): void {
-    this.removeHighlight();
+    this.removeCursor();
   }
 }
 

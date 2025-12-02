@@ -110,3 +110,18 @@ img[id^="cursorImg-"] {
 #osmdContainer svg {
   display: block;
 }
+
+/* Verovio cursor bar 스타일 (OSMD와 유사) */
+.verovio-cursor {
+  stroke: #33aa33 !important;
+  stroke-width: 3px !important;
+  opacity: 0.8 !important;
+  pointer-events: none !important;
+  z-index: 1000 !important;
+}
+
+/* Verovio SVG에서 cursor가 다른 요소 위에 표시되도록 */
+#osmdContainer svg .verovio-cursor {
+  position: relative;
+  z-index: 1000;
+}
