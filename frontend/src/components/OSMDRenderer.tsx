@@ -117,6 +117,12 @@ export class OSMDRendererImpl implements ScoreRenderer {
 
     this.osmd.cursor.update();
     this.osmd.cursor.show();
+
+    // Auto-scroll to keep cursor visible
+    const cursorEl = this.osmd.cursor.cursorElement;
+    if (cursorEl) {
+      cursorEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
   }
 
   highlightPosition(beat: number): void {

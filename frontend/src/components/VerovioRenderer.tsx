@@ -202,6 +202,9 @@ export class VerovioRendererImpl implements ScoreRenderer {
 
     pageMargin.appendChild(rect);
     this.cursorRect = rect;
+
+    // Auto-scroll to keep cursor visible
+    noteEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
   private removeCursor(): void {

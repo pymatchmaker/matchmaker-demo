@@ -262,7 +262,7 @@ const ScorePage: React.FC = () => {
         <p className="text-red-500 text-lg mb-4">{error}</p>
         <button
           onClick={() => router.push('/')}
-          className="px-6 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
+          className="px-6 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 text-sm"
         >
           Back to Upload
         </button>
@@ -296,161 +296,145 @@ const ScorePage: React.FC = () => {
             <div className="text-gray-500 text-lg">{loadingMessage}</div>
           </div>
         ) : (
-          <div className="flex flex-col items-center gap-2 py-3 px-4">
-            {/* Simulation mode controls */}
-            {isSimulationMode && (
-              <>
-                <div className="text-xs text-gray-400 mb-1">
-                  Simulation mode — align a recorded performance to the score, then play back with synchronized highlighting.
-                </div>
-                <div className="flex flex-wrap items-end justify-center gap-3">
-                  <div className="min-w-[180px]">
-                    <label className="block text-xs text-gray-400 mb-1">Alignment algorithm</label>
-                    <select
-                      value={selectedMethod}
-                      onChange={(e) => { setSelectedMethod(e.target.value); setAlignmentData(null); }}
-                      className="w-full px-3 py-2 text-sm rounded-lg bg-white border border-gray-200
-                        focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                    >
-                      {(availableMethods[performanceInputType] || []).map((m) => (
-                        <option key={m} value={m}>{m}</option>
-                      ))}
-                    </select>
-                  </div>
+          <div className="flex justify-center py-3 px-4">
+            <div className="inline-flex items-center gap-2 bg-white/80 backdrop-blur-md border border-gray-200 rounded-full px-3 py-2 shadow-sm">
+              {/* Simulation mode */}
+              {isSimulationMode && (
+                <>
+                  <span className="text-[11px] text-gray-400 px-1 hidden sm:inline">Simulation</span>
+                  <select
+                    value={selectedMethod}
+                    onChange={(e) => { setSelectedMethod(e.target.value); setAlignmentData(null); }}
+                    className="appearance-none bg-gray-50 text-gray-700 text-xs rounded-full px-3 py-1.5
+                      border border-gray-200 focus:outline-none focus:border-gray-300 cursor-pointer"
+                  >
+                    {(availableMethods[performanceInputType] || []).map((m) => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
                   {!alignmentData ? (
                     <button
                       onClick={runAlignment}
                       disabled={isPlaying}
-                      className="px-5 py-2 rounded-lg text-sm font-medium bg-blue-500 text-white hover:bg-blue-600 shadow-sm transition-all duration-150"
+                      className="px-4 py-1.5 rounded-full text-xs font-medium bg-gray-800 text-white hover:bg-gray-700 transition-colors"
                     >
-                      Run Simulation
+                      Run
                     </button>
                   ) : (
-                    <div className="flex gap-2">
+                    <>
                       <button
                         onClick={playMusic}
                         disabled={isPlaying}
-                        className={`flex items-center px-5 py-2 rounded-lg text-sm font-medium transition-all duration-150
+                        className={`w-8 h-8 rounded-full flex items-center justify-center text-xs transition-colors
                           ${!isPlaying
-                            ? 'bg-green-500 text-white hover:bg-green-600 shadow-sm'
-                            : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
+                            ? 'bg-emerald-500/90 text-white hover:bg-emerald-600'
+                            : 'bg-gray-100 text-gray-300 cursor-not-allowed'}`}
                       >
-                        ▶ Play
+                        ▶
                       </button>
                       <button
                         onClick={stopMusic}
                         disabled={!isPlaying}
-                        className={`flex items-center px-5 py-2 rounded-lg text-sm font-medium transition-all duration-150
+                        className={`w-8 h-8 rounded-full flex items-center justify-center text-xs transition-colors
                           ${isPlaying
-                            ? 'bg-red-500 text-white hover:bg-red-600 shadow-sm'
-                            : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
+                            ? 'bg-rose-500/90 text-white hover:bg-rose-600'
+                            : 'bg-gray-100 text-gray-300 cursor-not-allowed'}`}
                       >
-                        ■ Stop
+                        ■
                       </button>
-                    </div>
+                    </>
                   )}
-                </div>
-              </>
-            )}
+                </>
+              )}
 
-            {/* Live mode controls */}
-            {!isSimulationMode && (
-              <div className="flex flex-wrap items-end justify-center gap-3">
-                <div>
-                  <div className="flex rounded-lg overflow-hidden border border-gray-200 h-[34px]">
+              {/* Live mode */}
+              {!isSimulationMode && (
+                <>
+                  <div className="flex rounded-full overflow-hidden border border-gray-200">
                     <button
                       onClick={() => setInputType('Audio')}
-                      className={`px-4 text-sm font-medium transition-all duration-150
+                      className={`px-3 py-1.5 text-xs font-medium transition-colors
                         ${inputType === 'Audio'
-                          ? 'bg-blue-500 text-white'
-                          : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                          ? 'bg-gray-800 text-white'
+                          : 'text-gray-500 hover:bg-gray-50'}`}
                     >
                       Audio
                     </button>
                     <button
                       onClick={() => setInputType('MIDI')}
-                      className={`px-4 text-sm font-medium transition-all duration-150 border-l border-gray-200
+                      className={`px-3 py-1.5 text-xs font-medium transition-colors border-l border-gray-200
                         ${inputType === 'MIDI'
-                          ? 'bg-blue-500 text-white'
-                          : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                          ? 'bg-gray-800 text-white'
+                          : 'text-gray-500 hover:bg-gray-50'}`}
                     >
                       MIDI
                     </button>
                   </div>
-                </div>
 
-                {inputType === 'Audio' && (
-                  <div className="min-w-[200px]">
-                    <label className="block text-xs text-gray-400 mb-1">Device</label>
+                  {inputType === 'Audio' && (
                     <select
                       value={selectedAudioDevice}
                       onChange={(e) => setSelectedAudioDevice(e.target.value)}
-                      className="w-full px-3 py-2 text-sm rounded-lg bg-white border border-gray-200
-                        focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                      className="appearance-none bg-gray-50 text-gray-700 text-xs rounded-full px-3 py-1.5
+                        border border-gray-200 focus:outline-none focus:border-gray-300 cursor-pointer max-w-[180px]"
                     >
                       {audioDevices.map((device, index) => (
                         <option key={index} value={device.name}>{device.name}</option>
                       ))}
                     </select>
-                  </div>
-                )}
+                  )}
 
-                {inputType === 'MIDI' && (
-                  <div className="min-w-[200px]">
-                    <label className="block text-xs text-gray-400 mb-1">Device</label>
+                  {inputType === 'MIDI' && (
                     <select
                       value={selectedMidiDevice}
                       onChange={(e) => setSelectedMidiDevice(e.target.value)}
-                      className="w-full px-3 py-2 text-sm rounded-lg bg-white border border-gray-200
-                        focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                      className="appearance-none bg-gray-50 text-gray-700 text-xs rounded-full px-3 py-1.5
+                        border border-gray-200 focus:outline-none focus:border-gray-300 cursor-pointer max-w-[180px]"
                     >
                       {midiDevices.map((device, index) => (
                         <option key={index} value={device.name}>{device.name}</option>
                       ))}
                     </select>
-                  </div>
-                )}
+                  )}
 
-                {inputType && (
-                  <div className="min-w-[180px]">
-                    <label className="block text-xs text-gray-400 mb-1">Alignment algorithm</label>
+                  {inputType && (
                     <select
                       value={selectedMethod}
                       onChange={(e) => setSelectedMethod(e.target.value)}
-                      className="w-full px-3 py-2 text-sm rounded-lg bg-white border border-gray-200
-                        focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                      className="appearance-none bg-gray-50 text-gray-700 text-xs rounded-full px-3 py-1.5
+                        border border-gray-200 focus:outline-none focus:border-gray-300 cursor-pointer"
                     >
                       {(availableMethods[inputType === 'Audio' ? 'audio' : 'midi'] || []).map((m) => (
                         <option key={m} value={m}>{m}</option>
                       ))}
                     </select>
-                  </div>
-                )}
+                  )}
 
-                <div className="flex gap-2">
-                  <button
-                    onClick={playMusic}
-                    disabled={isPlaying}
-                    className={`flex items-center px-5 py-2 rounded-lg text-sm font-medium transition-all duration-150
-                      ${!isPlaying
-                        ? 'bg-green-500 text-white hover:bg-green-600 shadow-sm'
-                        : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
-                  >
-                    ▶ Play
-                  </button>
-                  <button
-                    onClick={stopMusic}
-                    disabled={!isPlaying}
-                    className={`flex items-center px-5 py-2 rounded-lg text-sm font-medium transition-all duration-150
-                      ${isPlaying
-                        ? 'bg-red-500 text-white hover:bg-red-600 shadow-sm'
-                        : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
-                  >
-                    ■ Stop
-                  </button>
-                </div>
-              </div>
-            )}
+                  <div className="flex gap-1">
+                    <button
+                      onClick={playMusic}
+                      disabled={isPlaying}
+                      className={`w-8 h-8 rounded-full flex items-center justify-center text-xs transition-colors
+                        ${!isPlaying
+                          ? 'bg-emerald-500/90 text-white hover:bg-emerald-600'
+                          : 'bg-gray-100 text-gray-300 cursor-not-allowed'}`}
+                    >
+                      ▶
+                    </button>
+                    <button
+                      onClick={stopMusic}
+                      disabled={!isPlaying}
+                      className={`w-8 h-8 rounded-full flex items-center justify-center text-xs transition-colors
+                        ${isPlaying
+                          ? 'bg-rose-500/90 text-white hover:bg-rose-600'
+                          : 'bg-gray-100 text-gray-300 cursor-not-allowed'}`}
+                    >
+                      ■
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         )}
         <div ref={vfRef} id="osmdContainer"></div>

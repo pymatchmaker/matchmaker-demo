@@ -28,7 +28,6 @@ const FileUpload: React.FC<FileUploadProps> = ({ backendUrl, onFileUpload }) => 
     setUploadProgress(0);
 
     try {
-      // Clean up previous uploads before starting new one
       await fetch(`${backendUrl}/reset`, { method: 'POST' }).catch(() => {});
 
       const formData = new FormData();
