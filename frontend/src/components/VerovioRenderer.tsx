@@ -42,6 +42,7 @@ export class VerovioRendererImpl implements ScoreRenderer {
   private cursorRect: SVGRectElement | null = null;
   private currentBeat = 0;
   private currentNoteId: string | null = null;
+  private lastNoteTop?: number;
 
   constructor(
     container: HTMLDivElement,
@@ -203,8 +204,12 @@ export class VerovioRendererImpl implements ScoreRenderer {
     pageMargin.appendChild(rect);
     this.cursorRect = rect;
 
-    // Auto-scroll to keep cursor visible
-    noteEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // Auto-scroll only when system changes
+    const noteTop = noteEl.getBoundingClientRect().top;
+    if (this.lastNoteTop === undefined || Math.abs(noteTop - this.lastNoteTop) > 50) {
+      noteEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    this.lastNoteTop = noteTop;
   }
 
   private removeCursor(): void {

@@ -6,6 +6,7 @@ export class OSMDRendererImpl implements ScoreRenderer {
   private notes: NoteInfo[] = [];
   private timeIndexMap: { [key: number]: number } = {};
   private onNotesRegistered?: (notes: NoteInfo[], timeIndexMap: { [key: number]: number }) => void;
+  private lastCursorTop?: number;
 
   constructor(container: HTMLElement, onNotesRegistered?: (notes: NoteInfo[], timeIndexMap: { [key: number]: number }) => void) {
     this.osmd = new OpenSheetMusicDisplay(container, {
@@ -118,10 +119,42 @@ export class OSMDRendererImpl implements ScoreRenderer {
     this.osmd.cursor.update();
     this.osmd.cursor.show();
 
-    // Auto-scroll to keep cursor visible
     const cursorEl = this.osmd.cursor.cursorElement;
     if (cursorEl) {
-      cursorEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // Dynamically set cursor height to match the current system's staff height
+      const cursorImg = cursorEl.querySelector('img') as HTMLImageElement | null;
+      if (cursorImg) {
+        const container = cursorEl.closest('#osmdContainer');
+        if (container) {
+          const staves = container.querySelectorAll('.vf-stave');
+          if (staves.length > 0) {
+            const cursorRect = cursorEl.getBoundingClientRect();
+
+            // Find staves in the same system (similar Y position)
+            let minY = Infinity, maxY = -Infinity;
+            staves.forEach((stave: Element) => {
+              const r = stave.getBoundingClientRect();
+              if (Math.abs(r.top - cursorRect.top) < 200) {
+                minY = Math.min(minY, r.top);
+                maxY = Math.max(maxY, r.bottom);
+              }
+            });
+
+            if (minY !== Infinity) {
+              const h = Math.round(maxY - minY);
+              cursorImg.height = h;
+              cursorImg.style.height = `${h}px`;
+            }
+          }
+        }
+      }
+
+      // Auto-scroll only when system changes
+      const cursorTop = cursorEl.getBoundingClientRect().top;
+      if (this.lastCursorTop === undefined || Math.abs(cursorTop - this.lastCursorTop) > 50) {
+        cursorEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      this.lastCursorTop = cursorTop;
     }
   }
 

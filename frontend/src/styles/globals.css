@@ -24,5 +24,8 @@
 }
 
 img[id^="cursorImg-"] {
+  z-index: 2 !important;
   height: 150px !important;
+  opacity: 0.6 !important;
 }
+
