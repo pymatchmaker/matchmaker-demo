@@ -56,7 +56,7 @@ export class OSMDRendererImpl implements ScoreRenderer {
       iterator.moveToNext();
     }
 
-    // 중복 제거 및 시간 인덱스 맵 생성
+    // Remove duplicates and build time-to-index map
     const uniqueNotes: NoteInfo[] = [];
     const timeIndexMapObj: { [key: number]: number } = {};
     
@@ -88,7 +88,7 @@ export class OSMDRendererImpl implements ScoreRenderer {
     }
 
     if (targetIndex === undefined) {
-      // 가장 가까운 위치 찾기
+      // Find the closest position
       const beats = Object.keys(this.timeIndexMap).map(Number).sort((a, b) => a - b);
       const closestBeat = beats.findLast((beat) => beat <= targetBeat) || beats[0];
       targetIndex = this.timeIndexMap[closestBeat];
@@ -111,7 +111,7 @@ export class OSMDRendererImpl implements ScoreRenderer {
   }
 
   highlightPosition(beat: number): void {
-    // OSMD는 cursor로 위치 표시하므로 moveToPosition에서 처리
+    // OSMD uses cursor to indicate position, so this is handled in moveToPosition
     this.moveToPosition(beat);
   }
 

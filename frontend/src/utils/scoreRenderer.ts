@@ -1,6 +1,6 @@
 /**
  * Score Renderer Utilities
- * 렌더러 추상화
+ * Renderer abstraction
  */
 
 export interface NoteInfo {

@@ -9,12 +9,15 @@ from pathlib import Path
 
 warnings.filterwarnings("ignore", module="partitura")
 
-from fastapi import FastAPI, File, UploadFile, WebSocket
+from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.websockets import WebSocketState
 
 from .position_manager import position_manager
 from .utils import (
+    find_performance_file_by_id,
+    find_score_file_by_id,
     get_audio_devices,
     get_midi_devices,
     preprocess_score,
@@ -25,17 +28,8 @@ from .utils import (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     upload_dir = Path("./uploads")
-    # Clean up at the start
-    if upload_dir.exists() and upload_dir.is_dir():
-        for file in upload_dir.iterdir():
-            if file.is_file():
-                file.unlink()
+    upload_dir.mkdir(exist_ok=True)
     yield
-    # Clean up at the end
-    if upload_dir.exists() and upload_dir.is_dir():
-        for file in upload_dir.iterdir():
-            if file.is_file():
-                file.unlink()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -75,12 +69,12 @@ async def upload_file(
     upload_dir = Path("./uploads")
     upload_dir.mkdir(exist_ok=True)
 
-    # Score file 저장
+    # Save score file
     file_path = upload_dir / f"{file_id}_{file.filename}"
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    # Performance file이 있으면 저장
+    # Save performance file if provided
     if performance_file:
         performance_path = (
             upload_dir / f"{file_id}_performance_{performance_file.filename}"
@@ -91,12 +85,52 @@ async def upload_file(
 
     musicxml_path = preprocess_score(file_path)
 
-    # MEI → MusicXML 변환된 경우, 변환 content를 응답에 포함
+    # If MEI was converted to MusicXML, include the converted content in the response
     result = {"file_id": file_id}
     if musicxml_path and musicxml_path.exists():
         result["musicxml_content"] = musicxml_path.read_text(encoding="utf-8")
 
     return result
+
+
+@app.get("/score/{file_id}")
+async def get_score(file_id: str):
+    """Return score file content and metadata for a given file_id."""
+    upload_dir = Path("./uploads")
+    score_file = None
+
+    # Find the original score file (xml/mei/musicxml only, not binary midi)
+    if upload_dir.exists():
+        for f in upload_dir.iterdir():
+            if (
+                f.is_file()
+                and f.stem.startswith(file_id)
+                and f.suffix in [".xml", ".mei", ".musicxml"]
+            ):
+                score_file = f
+                break
+
+    if not score_file:
+        raise HTTPException(status_code=404, detail="Score not found")
+
+    content = score_file.read_text(encoding="utf-8")
+    has_performance = find_performance_file_by_id(file_id) is not None
+
+    return {
+        "file_id": file_id,
+        "file_name": score_file.name.removeprefix(f"{file_id}_"),
+        "file_content": content,
+        "has_performance_file": has_performance,
+    }
+
+
+@app.get("/score/{file_id}/performance")
+async def get_performance(file_id: str):
+    """Return the performance audio/midi file."""
+    perf_file = find_performance_file_by_id(file_id)
+    if not perf_file:
+        raise HTTPException(status_code=404, detail="Performance file not found")
+    return FileResponse(str(perf_file))
 
 
 @app.websocket("/ws")

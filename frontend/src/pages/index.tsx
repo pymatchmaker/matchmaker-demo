@@ -1,220 +1,29 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React from 'react';
+import { useRouter } from 'next/router';
 import Head from 'next/head';
 import FileUpload from '../components/FileUpload';
-import CustomAudioPlayer from '../components/AudioPlayer';
-import { AudioPlayerRef } from '../components/AudioPlayer';
-import { ScoreRenderer } from '../utils/scoreRenderer';
-import { OSMDRendererImpl } from '../components/OSMDRenderer';
 
 const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
 
-interface FileUploadData {
-  file_id: string;
-  file_content: string;
-  hasPerformanceFile: boolean;
-  fileName?: string;
-  onset_beats?: number[];
-}
-
 const IndexPage: React.FC = () => {
-  const vfRef = useRef<HTMLDivElement>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isFileUploaded, setIsFileUploaded] = useState(false);
-  const [anchorPositionIndex, setAnchorPositionIndex] = useState<number>(0);
-  const [realTimePosition, setRealTimePosition] = useState<number>(0);
-  const [inputType, setInputType] = useState<'MIDI' | 'Audio' | ''>('');
-  const [audioDevices, setAudioDevices] = useState<Array<{ index: number; name: string }>>([]);
-  const [selectedAudioDevice, setSelectedAudioDevice] = useState<string>('');
-  const [midiDevices, setMidiDevices] = useState<Array<{ index: number; name: string }>>([]);
-  const [selectedMidiDevice, setSelectedMidiDevice] = useState<string>('');
-  const scoreRenderer = useRef<ScoreRenderer | null>(null);
-  const ws = useRef<WebSocket | null>(null);
-  const onsetBeats = useRef<number[] | null>([]);
-  const fileId = useRef<string | null>(null);
-  const uniqueNotesWRest = useRef<any[]>([]);
-  const timeIndexMap = useRef<{ [key: number]: number }>({}); // timeIndexMap: { time: index }
-  const [isSimulationMode, setIsSimulationMode] = useState(false);
-  const [performanceFile, setPerformanceFile] = useState<File | null>(null);
-  const audioPlayerRef = useRef<AudioPlayerRef>(null);
-  const scoreContainerRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (inputType === 'Audio') {
-      fetchAudioDevices();
-    }
-    else if (inputType === 'MIDI') {
-      fetchMidiDevices();
-    }
-  }, [inputType]);
+  const router = useRouter();
 
-  useEffect(() => {
-    console.log(`Real-time position: ${realTimePosition}, Anchor position index: ${anchorPositionIndex}`);
-    if (realTimePosition !== anchorPositionIndex) {
-      moveToTargetBeat(realTimePosition);
-      console.log("realTimePosition: ", realTimePosition);
-      setAnchorPositionIndex(realTimePosition);
-      console.log('Best position updated to:', anchorPositionIndex);
-    }
-  }, [realTimePosition]);
-
-  // 렌더러 초기화는 파일 업로드 시점에 수행
-
-
-  const logWithTimestamp = (message: string) => {
-    const now = new Date();
-    const timestamp = now.toISOString();
-    console.log(`[${timestamp}] ${message}`);
-  };
-
-  const registerNotesFromRenderer = (notes: any[], timeIndexMapObj: { [key: number]: number }) => {
-    uniqueNotesWRest.current = notes;
-    timeIndexMap.current = timeIndexMapObj;
-  };
-
-  const onFileUpload = async (data: { 
-    file_id: string; 
+  const onFileUpload = async (data: {
+    file_id: string;
     file_content: string;
     hasPerformanceFile: boolean;
     performanceFile?: File;
     fileName?: string;
   }) => {
-    fileId.current = data.file_id;
-    if (data.performanceFile && data.performanceFile instanceof File) {
-      console.log('Performance file received:', data.performanceFile);
-      setPerformanceFile(data.performanceFile);
-    }
-    try {
-      console.log('Performance file exists:', data.hasPerformanceFile);
-      setIsSimulationMode(data.hasPerformanceFile);
-      
-      // onset_beats는 서버에서 제공되지 않을 수 있으므로 옵셔널로 처리
-      // onsetBeats.current = data.onset_beats || [];
+    // Store score content in sessionStorage for immediate rendering on the score page
+    sessionStorage.setItem(`score_${data.file_id}`, JSON.stringify({
+      file_content: data.file_content,
+      file_name: data.fileName || '',
+      has_performance_file: data.hasPerformanceFile,
+    }));
 
-      if (!vfRef.current) {
-        console.error('Container ref not available');
-        return;
-      }
-
-      // 항상 OSMD 사용 (MEI는 백엔드에서 MusicXML로 변환됨)
-      scoreRenderer.current = new OSMDRendererImpl(
-        vfRef.current,
-        registerNotesFromRenderer
-      );
-
-      // 파일 로드 및 렌더링
-      await scoreRenderer.current.load(data.file_content);
-      await scoreRenderer.current.render();
-
-      // 초기화
-      scoreRenderer.current.reset();
-      scoreRenderer.current.show();
-      
-      setIsFileUploaded(true);
-    } catch (error) {
-      console.error('Error in onFileUpload:', error);
-    }
+    router.push(`/score/${data.file_id}`);
   };
-
-  const playMusic = async () => {
-    if (!scoreRenderer.current || !fileId.current) return;
-    
-    setIsPlaying(true);
-    if (performanceFile) {
-      audioPlayerRef.current?.play();
-    }
-
-    console.log('Starting music playback...');
-    scoreRenderer.current.reset();
-
-    const wsUrl = `${backendUrl.replace(/^http/, 'ws')}/ws`;
-    ws.current = new WebSocket(wsUrl);
-
-    ws.current.onopen = () => {
-      console.log('WebSocket connection opened');
-      const input_type = performanceFile 
-        ? (performanceFile.type.includes('midi') ? 'midi' : 'audio')
-        : (inputType === 'MIDI' ? 'midi' : 'audio');
-      
-      ws.current?.send(JSON.stringify({ 
-        file_id: fileId.current,
-        input_type: input_type,
-        device: performanceFile ? '' : (inputType === 'Audio' ? selectedAudioDevice : selectedMidiDevice),
-      }));
-    };
-
-    ws.current.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      console.log('WebSocket message received:', data);
-      
-      if (data.beat_position !== undefined) {
-        moveToTargetBeat(data.beat_position);
-      }
-    };
-
-    ws.current.onclose = () => {
-      console.log('WebSocket connection closed');
-      setIsPlaying(false);
-    };
-
-    ws.current.onerror = (error) => {
-      console.error('WebSocket error:', error);
-      setIsPlaying(false);
-    };
-  };
-
-  const findClosestIndex = (array: number[], target: number) => {
-    let closestIndex = array.findLastIndex((value) => value <= target);
-    if (closestIndex === -1) {
-      closestIndex = 0;
-    }
-    return closestIndex;
-  };
-
-  const moveToTargetBeat = (targetBeat: number) => {
-    logWithTimestamp(`Moving to target beat: ${targetBeat}`);
-    if (!scoreRenderer.current) return;
-    
-    scoreRenderer.current.moveToPosition(targetBeat);
-  };
-
-  const stopMusic = () => {
-    console.log('Stopping music');
-    if (scoreRenderer.current) {
-      scoreRenderer.current.hide();
-    }
-    setIsPlaying(false);
-    if (ws.current) {
-      ws.current.close();
-      ws.current = null;
-      console.log('WebSocket connection closed');
-    }
-  };
-
-  const fetchAudioDevices = async () => {
-    try {
-      const response = await fetch(`${backendUrl}/audio-devices`);
-      const data = await response.json();
-      setAudioDevices(data.devices);
-      if (data.devices.length > 0) {
-        setSelectedAudioDevice(data.devices[0].name);
-      }
-    } catch (error) {
-      console.error('Error fetching audio devices:', error);
-    }
-  };
-
-  const fetchMidiDevices = async () => {
-    try {
-      const response = await fetch(`${backendUrl}/midi-devices`);
-      const data = await response.json();
-      setMidiDevices(data.devices);
-      if (data.devices.length > 0) {
-        setSelectedMidiDevice(data.devices[0].name);
-      }
-    } catch (error) {
-      console.error('Error fetching midi devices:', error);
-    }
-  };
-  
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -222,12 +31,12 @@ const IndexPage: React.FC = () => {
         <title>Score Following App</title>
       </Head>
 
-      <div className={`text-center ${isFileUploaded ? 'mt-8 mb-4' : 'mt-24 -mb-8'}`}>
+      <div className="text-center mt-24 -mb-8">
         <h1 className="text-4xl font-bold mb-1">Score Following App</h1>
         <h2 className="text-2xl text-gray-600 mb-2">with Matchmaker</h2>
-        <a 
-          href="https://github.com/pymatchmaker/matchmaker" 
-          target="_blank" 
+        <a
+          href="https://github.com/pymatchmaker/matchmaker"
+          target="_blank"
           rel="noopener noreferrer"
           className="text-blue-800 hover:text-blue-900 text-sm inline-flex items-center relative z-10"
         >
@@ -239,115 +48,10 @@ const IndexPage: React.FC = () => {
       </div>
 
       <div className="flex-1 pb-32">
-        {!isFileUploaded && (
-          <div className="max-w-2xl mx-auto pt-16 px-8">
-            <FileUpload backendUrl={backendUrl} onFileUpload={onFileUpload} />
-          </div>
-        )}
-        {isFileUploaded && (
-          <div className="flex flex-col items-center space-y-3 py-2">
-            {!isSimulationMode && (
-              <div className="flex space-x-4">
-                <button
-                  onClick={() => setInputType('Audio')}
-                  className={`px-6 py-2 rounded-full font-medium transition-all duration-200
-                    ${inputType === 'Audio'
-                      ? 'bg-blue-500 text-white shadow-md scale-105'
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-                >
-                  🎤 Audio
-                </button>
-                <button
-                  onClick={() => setInputType('MIDI')}
-                  className={`px-6 py-2 rounded-full font-medium transition-all duration-200
-                    ${inputType === 'MIDI'
-                      ? 'bg-blue-500 text-white shadow-md scale-105'
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-                >
-                  🎹 MIDI
-                </button>
-              </div>
-            )}
-
-            {!isSimulationMode && inputType === 'Audio' && (
-              <div className="w-64">
-                <select
-                  value={selectedAudioDevice}
-                  onChange={(e) => setSelectedAudioDevice(e.target.value)}
-                  className="w-full px-4 py-2 rounded-md bg-white border border-gray-200 
-                    shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500
-                    transition-all duration-200"
-                >
-                  {audioDevices.map((device, index) => (
-                    <option key={index} value={device.name}>
-                      {device.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {!isSimulationMode && inputType === 'MIDI' && (
-              <div className="w-64">
-                <select
-                  value={selectedMidiDevice}
-                  onChange={(e) => setSelectedMidiDevice(e.target.value)}
-                  className="w-full px-4 py-2 rounded-md bg-white border border-gray-200 
-                    shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500
-                    transition-all duration-200"
-                >
-                  {midiDevices.map((device, index) => (
-                    <option key={index} value={device.name}>
-                      {device.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            <div className="flex space-x-4">
-              <button
-                onClick={playMusic}
-                disabled={isPlaying}
-                className={`flex items-center px-6 py-2 rounded-full font-medium transition-all duration-200
-                  ${!isPlaying
-                    ? 'bg-green-500 text-white hover:bg-green-600 shadow-md'
-                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
-              >
-                <span className="mr-2">▶️</span> Play
-              </button>
-              <button
-                onClick={stopMusic}
-                disabled={!isPlaying}
-                className={`flex items-center px-6 py-2 rounded-full font-medium transition-all duration-200
-                  ${isPlaying
-                    ? 'bg-red-500 text-white hover:bg-red-600 shadow-md'
-                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
-              >
-                <span className="mr-2">⏹️</span> Stop
-              </button>
-            </div>
-          </div>
-        )}
-        <div ref={vfRef} id="osmdContainer"></div>
-      </div>
-
-      {performanceFile && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg">
-          <CustomAudioPlayer 
-            ref={audioPlayerRef}
-            audioFile={performanceFile}
-            isPlaying={isPlaying}
-            onPlay={() => {
-              if (!isPlaying) playMusic();
-            }}
-            onPause={() => {
-              if (isPlaying) stopMusic();
-            }}
-            onEnded={stopMusic}
-          />
+        <div className="max-w-2xl mx-auto pt-16 px-8">
+          <FileUpload backendUrl={backendUrl} onFileUpload={onFileUpload} />
         </div>
-      )}
+      </div>
     </div>
   );
 };

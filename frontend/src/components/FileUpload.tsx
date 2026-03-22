@@ -56,10 +56,10 @@ const FileUpload: React.FC<FileUploadProps> = ({ backendUrl, onFileUpload }) => 
 
       onFileUpload({
         file_id: data.file_id,
-        file_content: data.musicxml_content || fileContent,
+        file_content: fileContent,
         hasPerformanceFile: !!audioFile,
         performanceFile: audioFile || undefined,
-        fileName: data.musicxml_content ? scoreFile.name.replace(/\.mei$/i, '.musicxml') : scoreFile.name
+        fileName: scoreFile.name
       });
 
     } catch (error) {

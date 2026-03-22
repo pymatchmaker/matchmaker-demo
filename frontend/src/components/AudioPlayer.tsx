@@ -8,7 +8,7 @@ export interface AudioPlayerRef {
 }
 
 interface CustomAudioPlayerProps {
-  audioFile: File;
+  audioFile: File | string;
   isPlaying: boolean;
   onPlay: () => void;
   onPause: () => void;
@@ -34,13 +34,13 @@ const CustomAudioPlayer = forwardRef<AudioPlayerRef, CustomAudioPlayerProps>(({
   }));
 
   const audioUrl = React.useMemo(() => {
+    if (typeof audioFile === 'string') return audioFile;
     return URL.createObjectURL(audioFile);
   }, [audioFile]);
 
-  // cleanup
   React.useEffect(() => {
     return () => {
-      if (audioUrl) {
+      if (audioUrl && audioUrl.startsWith('blob:')) {
         URL.revokeObjectURL(audioUrl);
       }
     };

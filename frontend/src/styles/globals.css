@@ -3,7 +3,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* OSMD 컨테이너 스타일 */
+/* OSMD container styles */
 /* #osmdContainer {
   position: relative !important;
   width: 100% !important;
@@ -11,38 +11,38 @@
   overflow: visible !important;
 } */
 
-/* 캔버스 페이지 스타일 */
+/* Canvas page styles */
 /* #osmdCanvasPage1 {
   position: relative !important;
   z-index: 1 !important;
 } */
 
-/* 커서 이미지 스타일 */
+/* Cursor image styles */
 /* img[id^="cursorImg-"] {
   position: absolute !important;
-  /* z-index: 2 !important;  /* 캔버스보다 높은 z-index */
+  /* z-index: 2 !important;  /* z-index higher than canvas */
   /* background-color: rgba(51, 170, 51, 0.8) !important; */
   /* width: 3px !important; */
   /* pointer-events: none !important; */
   /* opacity: 1 !important; */
   /* display: block !important; */
   /* visibility: visible !important; */
-  /* transform: translateZ(0) !important; /* 하드웨어 가속 활성화 */
+  /* transform: translateZ(0) !important; /* Enable hardware acceleration */
 
 
-/* SVG 스타일 */
+/* SVG styles */
 /* #osmdContainer svg {
   z-index: 1 !important;
   display: block;
 } */
 
-/* Tailwind의 preflight 스타일 재정의 */
+/* Override Tailwind preflight styles */
 #osmdContainer svg {
   display: block;
   vertical-align: middle;
 }
 
-/* 악보 요소들은 기본 스타일 유지 */
+/* Preserve default styles for score elements */
 #osmdContainer .vf-stave *,
 #osmdContainer .vf-stavenote *,
 #osmdContainer .vf-notehead *,
