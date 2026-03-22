@@ -1,48 +1,17 @@
-/* Add your global CSS styles here */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* OSMD container styles */
-/* #osmdContainer {
-  position: relative !important;
-  width: 100% !important;
-  height: auto !important;
-  overflow: visible !important;
-} */
+/* OSMD score container */
+#osmdContainer {
+  position: relative;
+}
 
-/* Canvas page styles */
-/* #osmdCanvasPage1 {
-  position: relative !important;
-  z-index: 1 !important;
-} */
-
-/* Cursor image styles */
-/* img[id^="cursorImg-"] {
-  position: absolute !important;
-  /* z-index: 2 !important;  /* z-index higher than canvas */
-  /* background-color: rgba(51, 170, 51, 0.8) !important; */
-  /* width: 3px !important; */
-  /* pointer-events: none !important; */
-  /* opacity: 1 !important; */
-  /* display: block !important; */
-  /* visibility: visible !important; */
-  /* transform: translateZ(0) !important; /* Enable hardware acceleration */
-
-
-/* SVG styles */
-/* #osmdContainer svg {
-  z-index: 1 !important;
-  display: block;
-} */
-
-/* Override Tailwind preflight styles */
 #osmdContainer svg {
   display: block;
   vertical-align: middle;
 }
 
-/* Preserve default styles for score elements */
 #osmdContainer .vf-stave *,
 #osmdContainer .vf-stavenote *,
 #osmdContainer .vf-notehead *,
@@ -52,61 +21,6 @@
   transform: initial;
 }
 
-body {
-  margin: 0;
-  padding: 0;
-  font-family: Arial, sans-serif;
-}
-
-.container {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 20px;
-}
-
-.button {
-  display: inline-block;
-  padding: 10px 20px;
-  background-color: #007bff;
-  color: #fff;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.button:hover {
-  background-color: #0056b3;
-}
-
-.input {
-  display: block;
-  width: 100%;
-  padding: 10px;
-  margin-bottom: 10px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-}
-
-.error {
-  color: red;
-  font-size: 14px;
-  margin-top: 5px;
-}
-
-.success {
-  color: green;
-  font-size: 14px;
-  margin-top: 5px;
-}
-
-#osmdContainer {
-  position: relative;
-}
-
 img[id^="cursorImg-"] {
   height: 150px !important;
-}
-
-#osmdContainer svg {
-  display: block;
 }

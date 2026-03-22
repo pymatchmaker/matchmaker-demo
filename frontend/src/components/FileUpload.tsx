@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react';
 
 interface FileUploadProps {
   backendUrl: string;
-  onFileUpload: (data: { 
+  onFileUpload: (data: {
     file_id: string;
     file_content: string;
     hasPerformanceFile: boolean;
@@ -22,17 +22,14 @@ const FileUpload: React.FC<FileUploadProps> = ({ backendUrl, onFileUpload }) => 
 
   const handleUpload = async () => {
     if (!scoreFile) return;
-    
+
     setIsUploading(true);
     setUploadProgress(0);
 
     try {
       const formData = new FormData();
       formData.append('file', scoreFile);
-      
-      if (audioFile) {
-        formData.append('performance_file', audioFile);
-      }
+      if (audioFile) formData.append('performance_file', audioFile);
 
       setUploadProgress(30);
 
@@ -42,10 +39,10 @@ const FileUpload: React.FC<FileUploadProps> = ({ backendUrl, onFileUpload }) => 
       });
 
       if (!response.ok) throw new Error('Upload failed');
-      
+
       setUploadProgress(60);
       const data = await response.json();
-      
+
       const fileContent = await new Promise<string>((resolve) => {
         const reader = new FileReader();
         reader.onload = (e) => resolve(e.target?.result as string);
@@ -72,16 +69,16 @@ const FileUpload: React.FC<FileUploadProps> = ({ backendUrl, onFileUpload }) => 
   };
 
   return (
-    <div className="space-y-8">
-      {/* Score Upload Section */}
-      <div 
-        className={`p-8 border-2 border-dashed rounded-lg text-center
-          ${isDragging ? 'border-blue-500 bg-blue-50' : 'border-gray-300'}
-          hover:border-blue-400 transition-colors duration-200`}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setIsDragging(true);
-        }}
+    <div className="space-y-3">
+      {/* Score drop zone */}
+      <div
+        className={`relative rounded-2xl border-2 border-dashed transition-all duration-200 cursor-pointer
+          ${isDragging
+            ? 'border-blue-400 bg-blue-50/50'
+            : scoreFile
+              ? 'border-green-300 bg-green-50/30'
+              : 'border-gray-200 hover:border-gray-300 bg-white'}`}
+        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
         onDragLeave={() => setIsDragging(false)}
         onDrop={(e) => {
           e.preventDefault();
@@ -89,17 +86,31 @@ const FileUpload: React.FC<FileUploadProps> = ({ backendUrl, onFileUpload }) => 
           const file = e.dataTransfer.files[0];
           if (file) setScoreFile(file);
         }}
+        onClick={() => scoreInputRef.current?.click()}
       >
-        <div className="text-lg font-semibold mb-2 text-gray-700">Sheet Music Score (MusicXML or MEI)</div>
-        <p className="text-sm text-gray-500 mb-4">
-          Drag and drop your score file here, or click to select
-        </p>
-        <button
-          onClick={() => scoreInputRef.current?.click()}
-          className="bg-blue-500 text-white px-6 py-2 rounded-md hover:bg-blue-600 transition-colors"
-        >
-          Select Score File
-        </button>
+        <div className="flex flex-col items-center py-10 px-6">
+          {scoreFile ? (
+            <>
+              <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center mb-3">
+                <svg className="w-5 h-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <p className="text-sm font-medium text-gray-900">{scoreFile.name}</p>
+              <p className="text-xs text-gray-400 mt-1">Click to change</p>
+            </>
+          ) : (
+            <>
+              <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center mb-3">
+                <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 18V5l12-2v13M9 18c0 1.1-1.3 2-3 2s-3-.9-3-2 1.3-2 3-2 3 .9 3 2zm12-2c0 1.1-1.3 2-3 2s-3-.9-3-2 1.3-2 3-2 3 .9 3 2z" />
+                </svg>
+              </div>
+              <p className="text-sm font-medium text-gray-700">Drop your score file here</p>
+              <p className="text-xs text-gray-400 mt-1">or click to browse</p>
+            </>
+          )}
+        </div>
         <input
           ref={scoreInputRef}
           type="file"
@@ -107,84 +118,71 @@ const FileUpload: React.FC<FileUploadProps> = ({ backendUrl, onFileUpload }) => 
           onChange={(e) => e.target.files?.[0] && setScoreFile(e.target.files[0])}
           className="hidden"
         />
-        {scoreFile && (
-          <div className="text-sm text-gray-600">
-            Selected: {scoreFile.name}
-          </div>
-        )}
       </div>
 
-      {/* Audio Upload Section (Optional) */}
-      <div className="p-8 border-2 border-dashed rounded-lg text-center border-gray-300">
-        <div className="text-lg font-semibold mb-2 text-gray-700">Performance File (Optional)</div>
-        <p className="text-sm text-gray-500 mb-4">
-          Upload a performance file (audio or midi) for simulation mode
-        </p>
-        <button
-          onClick={() => audioInputRef.current?.click()}
-          className="bg-gray-500 text-white px-6 py-2 rounded-md hover:bg-gray-600 transition-colors"
-        >
-          Select Performance File
-        </button>
+      {/* Performance file - compact row */}
+      <div
+        className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-4 py-3 cursor-pointer hover:border-gray-300 transition-colors"
+        onClick={() => audioInputRef.current?.click()}
+      >
+        <div className="flex items-center gap-3">
+          <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${audioFile ? 'bg-green-100' : 'bg-gray-100'}`}>
+            {audioFile ? (
+              <svg className="w-4 h-4 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+              </svg>
+            )}
+          </div>
+          <div>
+            <p className="text-sm text-gray-700">
+              {audioFile ? audioFile.name : 'Add performance file'}
+            </p>
+            <p className="text-xs text-gray-400">
+              {audioFile ? 'Click to change' : 'Optional - for simulation mode'}
+            </p>
+          </div>
+        </div>
+        <svg className="w-4 h-4 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
         <input
           ref={audioInputRef}
           type="file"
-          accept="audio/*"
+          accept="audio/*,.mid,.midi"
           onChange={(e) => e.target.files?.[0] && setAudioFile(e.target.files[0])}
           className="hidden"
         />
-        {audioFile && (
-          <div className="text-sm text-gray-600">
-            Selected: {audioFile.name}
-          </div>
-        )}
       </div>
 
-      {/* Upload Button and Progress */}
-      <div className="text-center">
-        {isUploading ? (
-          <div className="space-y-4">
-            <div className="w-full max-w-xs mx-auto bg-gray-200 rounded-full h-2.5 overflow-hidden">
-              <div 
-                className="bg-blue-500 h-full transition-all duration-500 ease-out"
-                style={{ width: `${uploadProgress}%` }}
-              />
-            </div>
-            <div className="text-sm text-gray-600">
-              {uploadProgress < 50 ? 'Uploading score...' : 'Processing score...'}
-            </div>
+      {/* Submit */}
+      {isUploading ? (
+        <div className="pt-2">
+          <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+            <div
+              className="bg-blue-500 h-full rounded-full transition-all duration-500 ease-out"
+              style={{ width: `${uploadProgress}%` }}
+            />
           </div>
-        ) : (
-          <button
-            onClick={handleUpload}
-            disabled={!scoreFile || isUploading}
-            className={`group relative px-8 py-3 rounded-md text-white font-medium
-              ${scoreFile && !isUploading
-                ? 'bg-green-500 hover:bg-green-600' 
-                : 'bg-gray-300 cursor-not-allowed'}
-              transition-all duration-200`}
-          >
-            <span className="flex items-center justify-center">
-              {scoreFile && (
-                <svg 
-                  className="w-5 h-5 mr-2 transition-transform group-hover:rotate-[360deg] duration-500" 
-                  fill="none" 
-                  viewBox="0 0 24 24" 
-                  stroke="currentColor"
-                >
-                  <path 
-                    strokeLinecap="round" 
-                    strokeLinejoin="round" 
-                    strokeWidth={2} 
-                    d="M9 13l3-3m0 0l3 3m-3-3v8"
-                  />
-                </svg>
-              )}
-              Upload and Start
-            </span>
-          </button>
-        )}
-      </div>
+          <p className="text-xs text-gray-400 text-center mt-2">
+            {uploadProgress < 50 ? 'Uploading...' : 'Processing score...'}
+          </p>
+        </div>
+      ) : (
+        <button
+          onClick={handleUpload}
+          disabled={!scoreFile}
+          className={`w-full py-3 rounded-xl text-sm font-medium transition-all duration-200
+            ${scoreFile
+              ? 'bg-gray-900 text-white hover:bg-gray-800 shadow-sm'
+              : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
+        >
+          Start Score Following
+        </button>
+      )}
     </div>
   );
 };

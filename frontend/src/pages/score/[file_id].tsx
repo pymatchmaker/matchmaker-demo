@@ -205,19 +205,17 @@ const ScorePage: React.FC = () => {
         <title>Score Following App</title>
       </Head>
 
-      <div className="text-center mt-8 mb-4">
-        <h1 className="text-4xl font-bold mb-1">Score Following App</h1>
-        <h2 className="text-2xl text-gray-600 mb-2">with Matchmaker</h2>
+      <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100">
+        <span className="text-sm font-medium text-gray-700">Score Following <span className="text-gray-400 font-normal">with Matchmaker</span></span>
         <a
           href="https://github.com/pymatchmaker/matchmaker"
           target="_blank"
           rel="noopener noreferrer"
-          className="text-blue-800 hover:text-blue-900 text-sm inline-flex items-center relative z-10"
+          className="text-gray-400 hover:text-gray-600 transition-colors"
         >
-          <svg className="w-4 h-4 mr-1" viewBox="0 0 16 16" fill="currentColor">
+          <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor">
             <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
           </svg>
-          View on GitHub
         </a>
       </div>
 
@@ -227,39 +225,42 @@ const ScorePage: React.FC = () => {
             <div className="text-gray-500 text-lg">Loading score...</div>
           </div>
         ) : (
-          <div className="flex flex-col items-center space-y-3 py-2">
+          <div className="flex flex-wrap items-end justify-center gap-3 py-3 px-4">
+            {/* Input type toggle */}
             {!isSimulationMode && (
-              <div className="flex space-x-4">
-                <button
-                  onClick={() => setInputType('Audio')}
-                  className={`px-6 py-2 rounded-full font-medium transition-all duration-200
-                    ${inputType === 'Audio'
-                      ? 'bg-blue-500 text-white shadow-md scale-105'
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-                >
-                  Audio
-                </button>
-                <button
-                  onClick={() => setInputType('MIDI')}
-                  className={`px-6 py-2 rounded-full font-medium transition-all duration-200
-                    ${inputType === 'MIDI'
-                      ? 'bg-blue-500 text-white shadow-md scale-105'
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-                >
-                  MIDI
-                </button>
+              <div>
+                <div className="flex rounded-lg overflow-hidden border border-gray-200 h-[34px]">
+                  <button
+                    onClick={() => setInputType('Audio')}
+                    className={`px-4 text-sm font-medium transition-all duration-150
+                      ${inputType === 'Audio'
+                        ? 'bg-blue-500 text-white'
+                        : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                  >
+                    Audio
+                  </button>
+                  <button
+                    onClick={() => setInputType('MIDI')}
+                    className={`px-4 text-sm font-medium transition-all duration-150 border-l border-gray-200
+                      ${inputType === 'MIDI'
+                        ? 'bg-blue-500 text-white'
+                        : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                  >
+                    MIDI
+                  </button>
+                </div>
               </div>
             )}
 
+            {/* Device select */}
             {!isSimulationMode && inputType === 'Audio' && (
-              <div className="w-64">
-                <label className="block text-sm text-gray-500 mb-1">Device</label>
+              <div className="min-w-[200px]">
+                <label className="block text-xs text-gray-400 mb-1">Device</label>
                 <select
                   value={selectedAudioDevice}
                   onChange={(e) => setSelectedAudioDevice(e.target.value)}
-                  className="w-full px-4 py-2 rounded-md bg-white border border-gray-200
-                    shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500
-                    transition-all duration-200"
+                  className="w-full px-3 py-2 text-sm rounded-lg bg-white border border-gray-200
+                    focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                 >
                   {audioDevices.map((device, index) => (
                     <option key={index} value={device.name}>{device.name}</option>
@@ -269,14 +270,13 @@ const ScorePage: React.FC = () => {
             )}
 
             {!isSimulationMode && inputType === 'MIDI' && (
-              <div className="w-64">
-                <label className="block text-sm text-gray-500 mb-1">Device</label>
+              <div className="min-w-[200px]">
+                <label className="block text-xs text-gray-400 mb-1">Device</label>
                 <select
                   value={selectedMidiDevice}
                   onChange={(e) => setSelectedMidiDevice(e.target.value)}
-                  className="w-full px-4 py-2 rounded-md bg-white border border-gray-200
-                    shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500
-                    transition-all duration-200"
+                  className="w-full px-3 py-2 text-sm rounded-lg bg-white border border-gray-200
+                    focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                 >
                   {midiDevices.map((device, index) => (
                     <option key={index} value={device.name}>{device.name}</option>
@@ -285,15 +285,15 @@ const ScorePage: React.FC = () => {
               </div>
             )}
 
+            {/* Algorithm select */}
             {!isSimulationMode && inputType && (
-              <div className="w-64">
-                <label className="block text-sm text-gray-500 mb-1">Alignment algorithm</label>
+              <div className="min-w-[180px]">
+                <label className="block text-xs text-gray-400 mb-1">Alignment algorithm</label>
                 <select
                   value={selectedMethod}
                   onChange={(e) => setSelectedMethod(e.target.value)}
-                  className="w-full px-4 py-2 rounded-md bg-white border border-gray-200
-                    shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500
-                    transition-all duration-200"
+                  className="w-full px-3 py-2 text-sm rounded-lg bg-white border border-gray-200
+                    focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                 >
                   {(availableMethods[inputType === 'Audio' ? 'audio' : 'midi'] || []).map((m) => (
                     <option key={m} value={m}>{m}</option>
@@ -302,26 +302,27 @@ const ScorePage: React.FC = () => {
               </div>
             )}
 
-            <div className="flex space-x-4">
+            {/* Play / Stop */}
+            <div className="flex gap-2">
               <button
                 onClick={playMusic}
                 disabled={isPlaying}
-                className={`flex items-center px-6 py-2 rounded-full font-medium transition-all duration-200
+                className={`flex items-center px-5 py-2 rounded-lg text-sm font-medium transition-all duration-150
                   ${!isPlaying
-                    ? 'bg-green-500 text-white hover:bg-green-600 shadow-md'
+                    ? 'bg-green-500 text-white hover:bg-green-600 shadow-sm'
                     : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
               >
-                <span className="mr-2">▶️</span> Play
+                ▶ Play
               </button>
               <button
                 onClick={stopMusic}
                 disabled={!isPlaying}
-                className={`flex items-center px-6 py-2 rounded-full font-medium transition-all duration-200
+                className={`flex items-center px-5 py-2 rounded-lg text-sm font-medium transition-all duration-150
                   ${isPlaying
-                    ? 'bg-red-500 text-white hover:bg-red-600 shadow-md'
+                    ? 'bg-red-500 text-white hover:bg-red-600 shadow-sm'
                     : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
               >
-                <span className="mr-2">⏹️</span> Stop
+                ■ Stop
               </button>
             </div>
           </div>
