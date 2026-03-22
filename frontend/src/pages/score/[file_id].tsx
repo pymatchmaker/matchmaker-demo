@@ -206,7 +206,7 @@ const ScorePage: React.FC = () => {
       </Head>
 
       <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100">
-        <span className="text-sm font-medium text-gray-700">Score Following <span className="text-gray-400 font-normal">with Matchmaker</span></span>
+        <a href="/" className="text-sm font-medium text-gray-700 hover:text-gray-900 transition-colors cursor-pointer">Score Following <span className="text-gray-400 font-normal">with Matchmaker</span></a>
         <a
           href="https://github.com/pymatchmaker/matchmaker"
           target="_blank"

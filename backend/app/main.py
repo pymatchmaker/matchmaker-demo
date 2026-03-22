@@ -52,6 +52,17 @@ async def root():
     return {"message": "Hello World"}
 
 
+@app.post("/reset")
+async def reset_uploads():
+    """Clear all uploaded files."""
+    upload_dir = Path("./uploads")
+    if upload_dir.exists():
+        for f in upload_dir.iterdir():
+            if f.is_file():
+                f.unlink()
+    return {"status": "ok"}
+
+
 @app.get("/audio-devices")
 async def audio_devices():
     devices = get_audio_devices()

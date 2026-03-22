@@ -23,6 +23,13 @@ const IndexPage: React.FC = () => {
     router.push(`/score/${data.file_id}`);
   };
 
+  // Clean up backend uploads when landing on the home page
+  React.useEffect(() => {
+    fetch(`${backendUrl}/reset`, { method: 'POST' })
+      .then(res => console.log('Reset uploads:', res.status))
+      .catch(err => console.error('Reset failed:', err));
+  }, []);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-gray-100 flex flex-col">
       <Head>
