@@ -8,6 +8,8 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
+import partitura
+
 warnings.filterwarnings("ignore", module="partitura")
 
 from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket
@@ -22,6 +24,7 @@ from .utils import (
     get_audio_devices,
     get_midi_devices,
     preprocess_score,
+    run_precomputed_alignment,
     run_score_following,
 )
 
@@ -105,6 +108,16 @@ async def upload_file(
             shutil.copyfileobj(performance_file.file, buffer)
         print(f"Performance file saved: {performance_path}")
 
+        # Convert MIDI performance to WAV for browser playback
+        if performance_path.suffix.lower() in [".mid", ".midi"]:
+            perf_wav_path = upload_dir / f"{file_id}_performance_audio.wav"
+            try:
+                perf_score = partitura.load_score(str(performance_path))
+                partitura.save_wav_fluidsynth(perf_score, str(perf_wav_path), bpm=120)
+                print(f"Converted MIDI performance to WAV: {perf_wav_path}")
+            except Exception as e:
+                print(f"MIDI to WAV conversion failed: {e}")
+
     musicxml_path = preprocess_score(file_path)
 
     # If MEI was converted to MusicXML, include the converted content in the response
@@ -113,6 +126,15 @@ async def upload_file(
         result["musicxml_content"] = musicxml_path.read_text(encoding="utf-8")
 
     return result
+
+
+@app.post("/score/{file_id}/alignment")
+def compute_alignment(file_id: str, method: str = "audio_outerhmm"):
+    """Run alignment on-demand with the specified method (runs in threadpool)."""
+    alignment = run_precomputed_alignment(file_id, method=method)
+    if alignment is None:
+        raise HTTPException(status_code=400, detail="Alignment failed")
+    return {"alignment": alignment}
 
 
 @app.get("/score/{file_id}")
@@ -148,7 +170,12 @@ async def get_score(file_id: str):
 
 @app.get("/score/{file_id}/performance")
 async def get_performance(file_id: str):
-    """Return the performance audio/midi file."""
+    """Return the performance audio file (MIDI files are served as converted WAV)."""
+    # Prefer converted WAV for MIDI performance files
+    perf_wav = Path("./uploads") / f"{file_id}_performance_audio.wav"
+    if perf_wav.exists():
+        return FileResponse(str(perf_wav))
+
     perf_file = find_performance_file_by_id(file_id)
     if not perf_file:
         raise HTTPException(status_code=404, detail="Performance file not found")

@@ -5,6 +5,8 @@
 /* OSMD score container */
 #osmdContainer {
   position: relative;
+  max-width: 1200px;
+  margin: 0 auto;
 }
 
 #osmdContainer svg {

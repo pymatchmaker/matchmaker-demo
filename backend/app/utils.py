@@ -672,9 +672,13 @@ def find_score_file_by_id(file_id: str, directory: Path = Path("./uploads")) -> 
 def find_performance_file_by_id(
     file_id: str, directory: Path = Path("./uploads")
 ) -> Optional[Path]:
-    """Find performance file with the given file_id"""
+    """Find the original performance file (excludes converted _performance_audio.wav)"""
     for file in directory.iterdir():
-        if file.is_file() and file.stem.startswith(f"{file_id}_performance"):
+        if (
+            file.is_file()
+            and file.stem.startswith(f"{file_id}_performance")
+            and not file.stem.endswith("_performance_audio")
+        ):
             return file
     return None
 
@@ -729,6 +733,113 @@ def get_midi_devices() -> list[dict]:
         logging.error(f"Error: {e}")
         devices = [{"index": 0, "name": "No midi devices found"}]
     return devices
+
+
+def run_precomputed_alignment(file_id: str, method: str = "audio_outerhmm") -> Optional[list[dict]]:
+    """Run offline alignment and return [{time, position}] pairs."""
+    score_file = find_score_file_by_id(file_id)
+    if not score_file:
+        logging.error(f"Score file not found for file_id: {file_id}")
+        return None
+
+    # Resolve MIDI file
+    if score_file.suffix.lower() == ".mei":
+        midi_file = score_file.parent / f"{score_file.stem}.mid"
+        if not midi_file.exists():
+            logging.error(f"MIDI file not found for: {score_file}")
+            return None
+        score_midi = str(midi_file)
+    else:
+        score_midi = str(score_file)
+
+    score_part = partitura.load_score_as_part(score_midi)
+    performance_file = find_performance_file_by_id(file_id)
+    if not performance_file:
+        logging.error(f"Performance file not found for file_id: {file_id}")
+        return None
+
+    perf_suffix = performance_file.suffix.lower()
+    input_type = "midi" if perf_suffix in [".mid", ".midi"] else "audio"
+
+    # Use appropriate default method if the provided one doesn't match input_type
+    audio_methods = {"arzt", "dixon", "pthmm", "audio_outerhmm"}
+    midi_methods = {"arzt", "dixon", "hmm", "pthmm", "outerhmm"}
+    valid_methods = midi_methods if input_type == "midi" else audio_methods
+    if method not in valid_methods:
+        method = "outerhmm" if input_type == "midi" else "audio_outerhmm"
+        logging.info(f"Method overridden to '{method}' for input_type '{input_type}'")
+
+    mm = Matchmaker(
+        score_file=score_midi,
+        performance_file=str(performance_file),
+        input_type=input_type,
+        method=method,
+    )
+
+    import math
+    from matchmaker.utils.stream import STREAM_END
+
+    # Run stream synchronously (not as thread) to avoid join() hang
+    mm.stream.run()
+    if not mm.stream.queue.empty():
+        mm.stream.queue.put(STREAM_END)
+
+    # Get timing info for mapping positions to time
+    frame_rate = mm.frame_rate or 1
+    perf_duration: Optional[float] = None
+    if input_type == "midi":
+        # Use WAV duration (what browser actually plays) for accurate sync
+        perf_wav = performance_file.parent / f"{file_id}_performance_audio.wav"
+        if perf_wav.exists():
+            import wave
+            with wave.open(str(perf_wav)) as w:
+                perf_duration = w.getnframes() / w.getframerate()
+        else:
+            perf_duration = mido.MidiFile(str(performance_file)).length
+
+    # Collect valid positions from score follower
+    positions: list[float] = []
+    try:
+        for pos in mm.score_follower.run(verbose=True):
+            val = float(pos)
+            if not math.isnan(val):
+                positions.append(val)
+    except (TypeError, ValueError):
+        pass
+
+    logging.info(f"Alignment completed: {len(positions)} positions")
+
+    # Build alignment: map quarter_position → time
+    # First pass: collect all quarter positions
+    quarter_positions: list[float] = []
+    for beat_pos in positions:
+        quarter_positions.append(convert_beat_to_quarter(score_part, beat_pos))
+
+    # Determine time scale: use actual WAV duration / max quarter position
+    max_quarter = max(quarter_positions) if quarter_positions else 1.0
+    if input_type == "midi" and perf_duration and max_quarter > 0:
+        sec_per_quarter = perf_duration / max_quarter
+    else:
+        sec_per_quarter = None
+
+    alignment = []
+    prev_quarter = None
+    for i, quarter_pos in enumerate(quarter_positions):
+        if sec_per_quarter is not None:
+            time_sec = float(quarter_pos) * sec_per_quarter
+        else:
+            time_sec = float(i) / frame_rate
+        if quarter_pos != prev_quarter:
+            alignment.append({"time": round(time_sec, 4), "position": float(quarter_pos)})
+            prev_quarter = quarter_pos
+
+    if alignment:
+        import json
+        alignment_path = Path(f"./uploads/{file_id}_alignment.json")
+        alignment_path.write_text(json.dumps(alignment))
+        logging.info(f"Saved precomputed alignment: {len(alignment)} entries")
+
+    return alignment
 
 
 def run_score_following(file_id: str, input_type: str, device: str, method: str = "audio_outerhmm", stop_event: Optional[threading.Event] = None) -> None:

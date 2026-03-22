@@ -8,7 +8,16 @@ export class OSMDRendererImpl implements ScoreRenderer {
   private onNotesRegistered?: (notes: NoteInfo[], timeIndexMap: { [key: number]: number }) => void;
 
   constructor(container: HTMLElement, onNotesRegistered?: (notes: NoteInfo[], timeIndexMap: { [key: number]: number }) => void) {
-    this.osmd = new OpenSheetMusicDisplay(container);
+    this.osmd = new OpenSheetMusicDisplay(container, {
+      autoResize: true,
+      drawTitle: true,
+    });
+    this.osmd.zoom = 0.5;
+    this.osmd.EngravingRules.TitleTopDistance = 2;
+    this.osmd.EngravingRules.SheetTitleHeight = 2.5;
+    this.osmd.EngravingRules.SheetSubtitleHeight = 1.5;
+    this.osmd.EngravingRules.SheetComposerHeight = 1.5;
+    this.osmd.EngravingRules.FixedMeasureWidth = false;
     this.onNotesRegistered = onNotesRegistered;
   }
 

@@ -8,6 +8,7 @@ interface FileUploadProps {
     hasPerformanceFile: boolean;
     performanceFile?: File;
     fileName?: string;
+    alignment?: Array<{time: number; position: number}>;
   }) => void;
 }
 
@@ -27,6 +28,9 @@ const FileUpload: React.FC<FileUploadProps> = ({ backendUrl, onFileUpload }) => 
     setUploadProgress(0);
 
     try {
+      // Clean up previous uploads before starting new one
+      await fetch(`${backendUrl}/reset`, { method: 'POST' }).catch(() => {});
+
       const formData = new FormData();
       formData.append('file', scoreFile);
       if (audioFile) formData.append('performance_file', audioFile);
@@ -56,7 +60,8 @@ const FileUpload: React.FC<FileUploadProps> = ({ backendUrl, onFileUpload }) => 
         file_content: fileContent,
         hasPerformanceFile: !!audioFile,
         performanceFile: audioFile || undefined,
-        fileName: scoreFile.name
+        fileName: scoreFile.name,
+        alignment: data.alignment || undefined,
       });
 
     } catch (error) {
