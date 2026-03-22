@@ -51,7 +51,7 @@ export class VerovioRendererImpl implements ScoreRenderer {
   private timeIndexMap: { [key: number]: number } = {};
   private currentBeat: number = 0;
   private highlightElement: SVGElement | null = null;
-  private cursorLine: SVGLineElement | null = null;
+  private cursorLine: SVGElement | null = null;
   private onNotesRegistered?: (notes: NoteInfo[], timeIndexMap: { [key: number]: number }) => void;
   private initialized: boolean = false;
   private beatToXPosition: Map<number, number> = new Map(); // beat -> x position mapping
@@ -108,8 +108,10 @@ export class VerovioRendererImpl implements ScoreRenderer {
     }
 
     // SVG 렌더링 (첫 페이지)
-    const svg = this.toolkit.renderToSVG(1, false);
-    this.container.innerHTML = svg;
+    const svgString = this.toolkit.renderToSVG(1, false);
+    this.container.innerHTML = svgString;
+    
+    // SVG 요소는 그대로 유지 (viewBox 변경하지 않음)
     
     // 노트 정보 추출
     this.extractNotes();
@@ -121,6 +123,170 @@ export class VerovioRendererImpl implements ScoreRenderer {
     if (this.onNotesRegistered) {
       this.onNotesRegistered(this.notes, this.timeIndexMap);
     }
+
+    // 테스트: 첫 노트 위치 하이라이트
+    this.highlightFirstNote();
+  }
+
+  private highlightFirstNote(): void {
+    if (!this.container) return;
+
+    const svg = this.container.querySelector('svg');
+    if (!svg) {
+      console.warn('SVG not found for first note highlight');
+      return;
+    }
+
+    // SVG 구조 디버깅
+    console.log('SVG viewBox:', svg.viewBox?.baseVal);
+    console.log('SVG bbox:', svg.getBBox());
+
+    // 모든 staff 요소 찾기 (더 많은 선택자 시도)
+    const staffSelectors = [
+      'g[class*="staff"]',
+      'g[data-id*="staff"]',
+      'g[class*="Staff"]',
+      'g[class*="system"]',
+      'g[class*="System"]',
+      '.staff',
+      '.system'
+    ];
+
+    let staffElements: NodeListOf<Element> | null = null;
+    for (const selector of staffSelectors) {
+      staffElements = svg.querySelectorAll(selector);
+      if (staffElements.length > 0) {
+        console.log(`Found ${staffElements.length} staff elements using selector "${selector}"`);
+        break;
+      }
+    }
+
+    // 첫 번째 measure나 시스템 찾기
+    let firstMeasure: Element | null = null;
+    const measureSelectors = [
+      'g[class*="measure"]',
+      'g[data-id*="measure"]',
+      'g[class*="Measure"]',
+      '.measure'
+    ];
+
+    for (const selector of measureSelectors) {
+      const measures = svg.querySelectorAll(selector);
+      if (measures.length > 0) {
+        firstMeasure = measures[0];
+        console.log(`Found first measure using selector "${selector}"`);
+        break;
+      }
+    }
+
+    // X 위치 찾기
+    let xPosition: number | null = null;
+
+    // 방법 1: 첫 번째 measure의 X 위치 사용
+    if (firstMeasure && 'getBBox' in firstMeasure) {
+      try {
+        const bbox = (firstMeasure as SVGGraphicsElement).getBBox();
+        xPosition = bbox.x;
+        console.log('First measure bbox:', bbox, 'X position:', xPosition);
+      } catch (e) {
+        console.warn('Error getting first measure bbox:', e);
+      }
+    }
+
+    // 방법 2: timemap에서 첫 번째 entry 사용
+    if (xPosition === null && this.toolkit) {
+      try {
+        const timeMap = this.toolkit.renderToTimemap({
+          includeMeasures: true,
+          includeRests: true
+        });
+        
+        if (timeMap && timeMap.length > 0) {
+          const firstEntry = timeMap[0];
+          console.log('First timemap entry:', firstEntry);
+          
+          if (firstEntry.on && firstEntry.on.length > 0) {
+            const noteId = firstEntry.on[0];
+            const noteElement = svg.querySelector(`[data-id="${noteId}"]`) ||
+                             svg.querySelector(`#${noteId}`) ||
+                             svg.querySelector(`[id="${noteId}"]`);
+            
+            if (noteElement && 'getBBox' in noteElement) {
+              const bbox = (noteElement as SVGGraphicsElement).getBBox();
+              xPosition = bbox.x;
+              console.log('First note from timemap bbox:', bbox, 'X position:', xPosition);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Error getting timemap for first note:', e);
+      }
+    }
+
+    // 방법 3: SVG의 왼쪽 가장자리 사용 (fallback)
+    if (xPosition === null) {
+      const svgRect = svg.viewBox?.baseVal || svg.getBBox();
+      xPosition = svgRect.x || 100; // 기본값
+      console.log('Using SVG left edge as fallback, X position:', xPosition);
+    }
+
+    // 전체 높이 계산 (모든 staff 포함)
+    const svgRect = svg.viewBox?.baseVal || svg.getBBox();
+    let svgHeight = svgRect.height || 3000;
+    let svgY = svgRect.y || 0;
+    
+    if (staffElements && staffElements.length > 0) {
+      let minY = Infinity;
+      let maxY = -Infinity;
+      
+      staffElements.forEach((staff) => {
+        if ('getBBox' in staff) {
+          try {
+            const bbox = (staff as SVGGraphicsElement).getBBox();
+            minY = Math.min(minY, bbox.y);
+            maxY = Math.max(maxY, bbox.y + bbox.height);
+            console.log('Staff bbox:', bbox);
+          } catch (e) {
+            console.warn('Error getting staff bbox:', e);
+          }
+        }
+      });
+      
+      if (minY !== Infinity && maxY !== Infinity) {
+        svgY = minY;
+        svgHeight = maxY - minY;
+        console.log('Calculated staff height:', svgHeight, 'Y:', svgY);
+      }
+    }
+
+    // 수직 사각형 생성 (모든 staff를 포함)
+    const cursorRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    const rectWidth = 5; // 테스트용으로 더 넓게
+    const rectX = xPosition - rectWidth / 2;
+    cursorRect.setAttribute('x', rectX.toString());
+    cursorRect.setAttribute('y', svgY.toString());
+    cursorRect.setAttribute('width', rectWidth.toString());
+    cursorRect.setAttribute('height', svgHeight.toString());
+    cursorRect.setAttribute('fill', '#ff0000'); // 빨간색으로 테스트
+    cursorRect.setAttribute('opacity', '0.8'); // 더 진하게
+    cursorRect.setAttribute('class', 'verovio-cursor-first-note');
+    cursorRect.setAttribute('id', 'verovio-first-note-rect'); // 디버깅용 ID
+    cursorRect.style.pointerEvents = 'none';
+    cursorRect.style.zIndex = '10000';
+    
+    // SVG에 추가 (가장 마지막에 추가하여 위에 표시)
+    svg.appendChild(cursorRect);
+    
+    // DOM에 실제로 추가되었는지 확인
+    const addedRect = svg.querySelector('#verovio-first-note-rect');
+    console.log('First note highlight rectangle added:', {
+      x: rectX,
+      y: svgY,
+      width: rectWidth,
+      height: svgHeight,
+      addedToDOM: !!addedRect,
+      svgChildren: svg.children.length
+    });
   }
 
   private buildBeatToPositionMap(): void {
@@ -139,6 +305,16 @@ export class VerovioRendererImpl implements ScoreRenderer {
       // SVG에서 각 시간에 해당하는 요소의 X 좌표 찾기
       const svg = this.container.querySelector('svg');
       if (!svg) return;
+      
+      // viewBox 정보 가져오기 (좌표 변환에 필요)
+      const viewBox = svg.viewBox?.baseVal;
+      
+      console.log('Building position map with viewBox:', viewBox ? {
+        x: viewBox.x,
+        y: viewBox.y,
+        width: viewBox.width,
+        height: viewBox.height
+      } : 'none');
       
       // 첫 번째 entry를 로깅하여 구조 확인
       if (timeMap.length > 0) {
@@ -233,10 +409,41 @@ export class VerovioRendererImpl implements ScoreRenderer {
             }
           }
           
-          // 찾은 X 위치를 매핑에 저장
+          // 찾은 X 위치를 매핑에 저장 (viewBox 좌표계로 변환)
           if (foundX !== null) {
-            this.quarterToXPosition.set(quarterPosition, foundX);
-            this.beatToXPosition.set(beat, foundX);
+            // 절대 좌표를 viewBox 좌표계로 변환
+            let viewBoxX = foundX;
+            if (viewBox && viewBox.width > 0) {
+              // 절대 좌표를 viewBox 좌표계로 변환
+              if (foundX >= viewBox.x) {
+                viewBoxX = foundX - viewBox.x;
+              } else {
+                // foundX가 viewBox.x보다 작으면 이미 viewBox 좌표계일 수 있음
+                // 하지만 foundX가 viewBox.width보다 크면 절대 좌표
+                if (foundX > viewBox.width) {
+                  // 절대 좌표로 간주하고 변환
+                  viewBoxX = foundX - viewBox.x;
+                } else {
+                  // 이미 viewBox 좌표계
+                  viewBoxX = foundX;
+                }
+              }
+              
+              // viewBox 내부에 있는지 확인하고 제한
+              if (viewBoxX < 0) viewBoxX = 0;
+              if (viewBoxX > viewBox.width) {
+                // viewBox 밖이면 스킵하거나 viewBox 내부로 제한
+                console.debug(`X position ${viewBoxX} is outside viewBox width ${viewBox.width}, limiting to ${viewBox.width}`);
+                viewBoxX = viewBox.width - 1; // 최소한의 너비를 위해
+              }
+              
+              this.quarterToXPosition.set(quarterPosition, viewBoxX);
+              this.beatToXPosition.set(beat, viewBoxX);
+            } else {
+              // viewBox가 없으면 절대 좌표 사용
+              this.quarterToXPosition.set(quarterPosition, foundX);
+              this.beatToXPosition.set(beat, foundX);
+            }
           }
         }
       });
@@ -251,13 +458,44 @@ export class VerovioRendererImpl implements ScoreRenderer {
               const bbox = svgElement.getBBox();
               const quarterPos = index * 4; // 각 measure를 4 quarter로 가정
               const beat = quarterPos * 4;
-              this.quarterToXPosition.set(quarterPos, bbox.x);
-              this.beatToXPosition.set(beat, bbox.x);
+              
+              // viewBox 좌표계로 변환
+              let viewBoxX = bbox.x;
+              if (viewBox && viewBox.width > 0) {
+                // 절대 좌표를 viewBox 좌표계로 변환
+                if (bbox.x >= viewBox.x) {
+                  viewBoxX = bbox.x - viewBox.x;
+                } else if (bbox.x > viewBox.width) {
+                  // bbox.x가 viewBox.width보다 크면 절대 좌표
+                  viewBoxX = bbox.x - viewBox.x;
+                } else {
+                  // 이미 viewBox 좌표계
+                  viewBoxX = bbox.x;
+                }
+                
+                // viewBox 내부로 제한
+                if (viewBoxX < 0) viewBoxX = 0;
+                if (viewBoxX > viewBox.width) {
+                  viewBoxX = viewBox.width - 1;
+                }
+                
+                this.quarterToXPosition.set(quarterPos, viewBoxX);
+                this.beatToXPosition.set(beat, viewBoxX);
+              } else {
+                this.quarterToXPosition.set(quarterPos, bbox.x);
+                this.beatToXPosition.set(beat, bbox.x);
+              }
             } catch (e) {
               console.debug(`Could not get bbox for measure ${index}:`, e);
             }
           }
         });
+      }
+      
+      console.log(`Built position map: ${this.quarterToXPosition.size} quarter positions`);
+      if (this.quarterToXPosition.size > 0) {
+        const sampleEntries = Array.from(this.quarterToXPosition.entries()).slice(0, 5);
+        console.log('Sample position mappings:', sampleEntries);
       }
       
       console.log(`Built position map: ${this.quarterToXPosition.size} quarter positions, ${this.beatToXPosition.size} beat positions`);
@@ -497,9 +735,12 @@ export class VerovioRendererImpl implements ScoreRenderer {
     // 기존 cursor 제거
     this.removeCursor();
 
-    // SVG에서 해당 beat 위치의 X 좌표 찾기
+    // SVG 요소 가져오기
     const svg = this.container.querySelector('svg');
-    if (!svg) return;
+    if (!svg) {
+      console.warn('SVG not found');
+      return;
+    }
 
     // 서버에서 보내는 값은 quarter_position이지만, JSON 키는 "beat_position"
     // Verovio의 qstamp는 quarter note 단위이므로, 받은 값을 quarter_position으로 처리
@@ -509,7 +750,7 @@ export class VerovioRendererImpl implements ScoreRenderer {
     if (this.quarterToXPosition.size > 0) {
       xPosition = this.getXPositionForQuarter(beat);
       if (xPosition !== null) {
-        console.debug(`Found X position for quarter_position ${beat}: ${xPosition}`);
+        console.log(`Found X position for quarter_position ${beat}: ${xPosition}`);
       }
     }
     
@@ -517,55 +758,211 @@ export class VerovioRendererImpl implements ScoreRenderer {
     if (xPosition === null) {
       xPosition = this.getXPositionForBeat(beat);
       if (xPosition !== null) {
-        console.debug(`Found X position for beat ${beat}: ${xPosition}`);
+        console.log(`Found X position for beat ${beat}: ${xPosition}`);
       }
     }
     
+    // X 위치를 찾지 못한 경우 첫 번째 노트 위치 사용 (fallback)
     if (xPosition === null) {
-      console.warn(`Could not find X position for beat/quarter: ${beat}`, {
-        quarterMapSize: this.quarterToXPosition.size,
-        beatMapSize: this.beatToXPosition.size,
-        quarterKeys: Array.from(this.quarterToXPosition.keys()).slice(0, 10),
-        beatKeys: Array.from(this.beatToXPosition.keys()).slice(0, 10)
+      console.warn(`Could not find X position for beat/quarter: ${beat}, using first note as fallback`);
+      
+      // timemap에서 첫 번째 노트 위치 사용
+      if (this.toolkit) {
+        try {
+          const timeMap = this.toolkit.renderToTimemap({
+            includeMeasures: true,
+            includeRests: true
+          });
+          
+          if (timeMap && timeMap.length > 0) {
+            const firstEntry = timeMap[0];
+            if (firstEntry.on && firstEntry.on.length > 0) {
+              const noteId = firstEntry.on[0];
+              const noteElement = svg.querySelector(`[data-id="${noteId}"]`) ||
+                               svg.querySelector(`#${noteId}`) ||
+                               svg.querySelector(`[id="${noteId}"]`);
+              
+              if (noteElement && 'getBBox' in noteElement) {
+                const bbox = (noteElement as SVGGraphicsElement).getBBox();
+                xPosition = bbox.x;
+                console.log('Using first note from timemap as fallback:', bbox);
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('Error getting timemap:', e);
+        }
+      }
+      
+      // 여전히 찾지 못한 경우 viewBox 사용
+      if (xPosition === null) {
+        const viewBox = svg.viewBox?.baseVal;
+        if (viewBox && viewBox.width > 0) {
+          xPosition = 0; // viewBox 좌표계
+        } else {
+          const svgBBox = svg.getBBox();
+          xPosition = svgBBox.x;
+        }
+      }
+    }
+
+    // Y 위치와 높이 계산 (모든 staff 포함)
+    const viewBox = svg.viewBox?.baseVal;
+    const svgBBox = svg.getBBox();
+    let yPosition: number = 0;
+    let rectHeight: number = 0;
+    const rectWidth = 4; // 사각형 너비
+
+    // 모든 staff 요소를 찾아서 전체 높이 계산
+    const staffElements = svg.querySelectorAll('g[class*="staff"], g[data-id*="staff"]');
+    if (staffElements.length > 0) {
+      let minY = Infinity;
+      let maxY = -Infinity;
+      
+      staffElements.forEach((staff) => {
+        if ('getBBox' in staff) {
+          try {
+            const bbox = (staff as SVGGraphicsElement).getBBox();
+            minY = Math.min(minY, bbox.y);
+            maxY = Math.max(maxY, bbox.y + bbox.height);
+          } catch (e) {
+            // getBBox 실패 시 무시
+          }
+        }
       });
-      return;
+      
+      if (minY !== Infinity && maxY !== -Infinity) {
+        yPosition = minY;
+        rectHeight = maxY - minY;
+      }
+    }
+    
+    // staff를 찾지 못한 경우 viewBox 또는 bbox 사용
+    if (rectHeight === 0) {
+      if (viewBox && viewBox.height > 0) {
+        yPosition = 0; // viewBox 좌표계
+        rectHeight = viewBox.height;
+      } else {
+        yPosition = svgBBox.y;
+        rectHeight = svgBBox.height > 0 ? svgBBox.height : 0;
+      }
+    }
+    
+    if (rectHeight > 0) {
+      console.log('Adjusted height using staff elements:', { yPosition, rectHeight });
     }
 
-    // SVG의 전체 높이 가져오기
-    const svgRect = svg.viewBox?.baseVal || svg.getBBox();
-    const svgHeight = svgRect.height || 3000;
-    const svgWidth = svgRect.width || 2000;
+    // 절대 좌표를 viewBox 좌표계로 변환
+    // viewBox가 있으면, SVG 내부 요소는 viewBox 좌표계를 사용
+    let finalX = xPosition;
+    let finalY = yPosition;
+    
+    if (viewBox && viewBox.width > 0 && viewBox.height > 0) {
+      // X 좌표 변환: 절대 좌표를 viewBox 좌표계로
+      // xPosition이 viewBox.width보다 크면 절대 좌표로 간주
+      if (xPosition > viewBox.width) {
+        // 절대 좌표를 viewBox 좌표계로 변환
+        if (xPosition >= viewBox.x) {
+          finalX = xPosition - viewBox.x;
+        } else {
+          // xPosition이 viewBox.x보다 작으면 이미 변환된 좌표일 수 있음
+          finalX = xPosition;
+        }
+      } else {
+        // xPosition이 viewBox.width보다 작거나 같으면 이미 viewBox 좌표계
+        finalX = xPosition;
+      }
+      
+      // Y 좌표 변환: 절대 좌표를 viewBox 좌표계로
+      // yPosition이 viewBox.height보다 크면 절대 좌표로 간주
+      if (yPosition > viewBox.height) {
+        if (yPosition >= viewBox.y) {
+          finalY = yPosition - viewBox.y;
+        } else {
+          finalY = yPosition;
+        }
+      } else {
+        finalY = yPosition;
+      }
+      
+      // 높이는 viewBox 높이로 제한
+      if (rectHeight > viewBox.height) {
+        rectHeight = viewBox.height;
+      }
+      
+      // 최종 좌표가 viewBox 범위 내에 있는지 확인하고 제한
+      if (finalX < 0) finalX = 0;
+      if (finalX + rectWidth > viewBox.width) {
+        finalX = Math.max(0, viewBox.width - rectWidth);
+      }
+      if (finalY < 0) finalY = 0;
+      if (finalY + rectHeight > viewBox.height) {
+        rectHeight = viewBox.height - finalY;
+      }
+      
+      console.log('Final coordinates (viewBox):', {
+        original: { x: xPosition, y: yPosition, height: rectHeight },
+        final: { x: finalX, y: finalY, height: rectHeight },
+        viewBox: `${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}`,
+        inViewBox: finalX >= 0 && finalX + rectWidth <= viewBox.width && finalY >= 0 && finalY + rectHeight <= viewBox.height
+      });
+    }
 
-    // OSMD 스타일의 수직 cursor bar 생성
-    const cursorLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-    cursorLine.setAttribute('x1', xPosition.toString());
-    cursorLine.setAttribute('y1', '0');
-    cursorLine.setAttribute('x2', xPosition.toString());
-    cursorLine.setAttribute('y2', svgHeight.toString());
-    cursorLine.setAttribute('stroke', '#33aa33'); // OSMD와 유사한 녹색
-    cursorLine.setAttribute('stroke-width', '3');
-    cursorLine.setAttribute('opacity', '0.8');
-    cursorLine.setAttribute('class', 'verovio-cursor');
-    cursorLine.style.pointerEvents = 'none';
-    cursorLine.style.zIndex = '1000';
+    console.log('Drawing rectangle:', {
+      x: finalX,
+      y: finalY,
+      width: rectWidth,
+      height: rectHeight,
+      viewBox: viewBox ? `${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}` : 'none',
+      originalX: xPosition,
+      originalY: yPosition
+    });
+
+    // 수직 사각형 생성
+    const cursorRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    cursorRect.setAttribute('x', finalX.toString());
+    cursorRect.setAttribute('y', finalY.toString());
+    cursorRect.setAttribute('width', rectWidth.toString());
+    cursorRect.setAttribute('height', rectHeight.toString());
+    cursorRect.setAttribute('fill', '#ff0000'); // 빨간색
+    cursorRect.setAttribute('stroke', '#000000'); // 검은색 테두리
+    cursorRect.setAttribute('stroke-width', '3');
+    cursorRect.setAttribute('opacity', '1'); // 완전 불투명
+    cursorRect.setAttribute('class', 'verovio-cursor');
+    cursorRect.setAttribute('id', 'verovio-cursor-rect');
+    cursorRect.setAttribute('style', 'pointer-events: none;');
     
-    // SVG의 최상위 레이어에 추가 (다른 요소 위에 표시)
-    const defs = svg.querySelector('defs') || document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-    if (!svg.querySelector('defs')) {
-      svg.insertBefore(defs, svg.firstChild);
+    // SVG의 맨 마지막에 추가 (다른 모든 요소 위에 표시)
+    svg.appendChild(cursorRect);
+    this.cursorLine = cursorRect;
+    
+    // DOM에 실제로 추가되었는지 확인
+    const addedRect = svg.querySelector('#verovio-cursor-rect');
+    let rectBBox = null;
+    let rectComputedStyle = null;
+    try {
+      rectBBox = cursorRect.getBBox();
+      rectComputedStyle = window.getComputedStyle(cursorRect);
+    } catch (e) {
+      console.warn('Could not get rect info:', e);
     }
     
-    // cursor를 SVG의 마지막에 추가하여 위에 표시
-    svg.appendChild(cursorLine);
-    this.cursorLine = cursorLine;
+    console.log('Rectangle added:', {
+      addedToDOM: !!addedRect,
+      rectBBox: rectBBox,
+      computedStyle: {
+        display: rectComputedStyle?.display,
+        visibility: rectComputedStyle?.visibility,
+        opacity: rectComputedStyle?.opacity,
+        fill: rectComputedStyle?.fill
+      },
+      rectElement: cursorRect,
+      parentElement: cursorRect.parentElement,
+      svgChildren: svg.children.length
+    });
     
-    // 스크롤하여 cursor 위치로 이동
-    const containerRect = this.container.getBoundingClientRect();
-    const scrollContainer = this.container.parentElement;
-    if (scrollContainer) {
-      const scrollX = xPosition - containerRect.width / 2;
-      scrollContainer.scrollLeft = Math.max(0, scrollX);
-    }
+    // 강제로 다시 그리기 시도
+    cursorRect.setAttribute('fill', '#ff0000');
   }
 
   private removeCursor(): void {

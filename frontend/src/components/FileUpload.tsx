@@ -3,8 +3,7 @@ import React, { useRef, useState } from 'react';
 interface FileUploadProps {
   backendUrl: string;
   onFileUpload: (data: { 
-    file_id: string; 
-    onset_beats: number[]; 
+    file_id: string;
     file_content: string;
     hasPerformanceFile: boolean;
     performanceFile?: File;
@@ -54,13 +53,13 @@ const FileUpload: React.FC<FileUploadProps> = ({ backendUrl, onFileUpload }) => 
       });
 
       setUploadProgress(100);
-      
+
       onFileUpload({
         file_id: data.file_id,
-        file_content: fileContent,
+        file_content: data.musicxml_content || fileContent,
         hasPerformanceFile: !!audioFile,
         performanceFile: audioFile || undefined,
-        fileName: scoreFile.name
+        fileName: data.musicxml_content ? scoreFile.name.replace(/\.mei$/i, '.musicxml') : scoreFile.name
       });
 
     } catch (error) {

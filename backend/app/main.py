@@ -89,8 +89,14 @@ async def upload_file(
             shutil.copyfileobj(performance_file.file, buffer)
         print(f"Performance file saved: {performance_path}")
 
-    preprocess_score(file_path)
-    return {"file_id": file_id}
+    musicxml_path = preprocess_score(file_path)
+
+    # MEI → MusicXML 변환된 경우, 변환 content를 응답에 포함
+    result = {"file_id": file_id}
+    if musicxml_path and musicxml_path.exists():
+        result["musicxml_content"] = musicxml_path.read_text(encoding="utf-8")
+
+    return result
 
 
 @app.websocket("/ws")

@@ -3,9 +3,8 @@ import Head from 'next/head';
 import FileUpload from '../components/FileUpload';
 import CustomAudioPlayer from '../components/AudioPlayer';
 import { AudioPlayerRef } from '../components/AudioPlayer';
-import { ScoreRenderer, detectScoreFormat, detectScoreFormatFromContent, ScoreFormat } from '../utils/scoreRenderer';
+import { ScoreRenderer } from '../utils/scoreRenderer';
 import { OSMDRendererImpl } from '../components/OSMDRenderer';
-import { VerovioRendererImpl } from '../components/VerovioRenderer';
 
 const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
 
@@ -38,8 +37,6 @@ const IndexPage: React.FC = () => {
   const [performanceFile, setPerformanceFile] = useState<File | null>(null);
   const audioPlayerRef = useRef<AudioPlayerRef>(null);
   const scoreContainerRef = useRef<HTMLDivElement>(null);
-  const [scoreFormat, setScoreFormat] = useState<ScoreFormat>('unknown');
-
   useEffect(() => {
     if (inputType === 'Audio') {
       fetchAudioDevices();
@@ -97,31 +94,11 @@ const IndexPage: React.FC = () => {
         return;
       }
 
-      // 파일 형식 감지
-      let format: ScoreFormat = 'unknown';
-      if (data.fileName) {
-        format = detectScoreFormat(data.fileName);
-      }
-      if (format === 'unknown') {
-        format = detectScoreFormatFromContent(data.file_content);
-      }
-      setScoreFormat(format);
-
-      console.log('Detected score format:', format);
-
-      // 형식에 따라 적절한 렌더러 선택
-      if (format === 'mei') {
-        scoreRenderer.current = new VerovioRendererImpl(
-          vfRef.current,
-          registerNotesFromRenderer
-        );
-      } else {
-        // MusicXML 또는 기본값은 OSMD 사용
-        scoreRenderer.current = new OSMDRendererImpl(
-          vfRef.current,
-          registerNotesFromRenderer
-        );
-      }
+      // 항상 OSMD 사용 (MEI는 백엔드에서 MusicXML로 변환됨)
+      scoreRenderer.current = new OSMDRendererImpl(
+        vfRef.current,
+        registerNotesFromRenderer
+      );
 
       // 파일 로드 및 렌더링
       await scoreRenderer.current.load(data.file_content);
