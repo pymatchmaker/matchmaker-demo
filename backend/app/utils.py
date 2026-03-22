@@ -1,4 +1,5 @@
 import logging
+import threading
 import traceback
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -730,7 +731,7 @@ def get_midi_devices() -> list[dict]:
     return devices
 
 
-def run_score_following(file_id: str, input_type: str, device: str) -> None:
+def run_score_following(file_id: str, input_type: str, device: str, method: str = "audio_outerhmm", stop_event: Optional[threading.Event] = None) -> None:
     score_file = find_score_file_by_id(file_id)
     if not score_file:
         logging.error(f"Score file not found for file_id: {file_id}")
@@ -775,15 +776,24 @@ def run_score_following(file_id: str, input_type: str, device: str) -> None:
         performance_file=performance_file if performance_file else None,
         input_type=actual_input_type,
         device_name_or_index=device if not performance_file else None,
+        method=method,
     )
 
     try:
-        while alignment_in_progress:
-            print(f"Running score following... (input type: {actual_input_type})")
-            for current_position in mm.run():
-                quarter_position = convert_beat_to_quarter(score_part, current_position)
-                position_manager.set_position(file_id, quarter_position)
-            alignment_in_progress = False
+        print(f"Running score following... (input type: {actual_input_type}, method: {method})")
+        for current_position in mm.run():
+            if stop_event and stop_event.is_set():
+                print("Score following stopped by client")
+                # Signal the stream to stop via STREAM_END
+                try:
+                    from matchmaker.utils.stream import STREAM_END
+                    if mm.stream and hasattr(mm.stream, 'queue'):
+                        mm.stream.queue.put(STREAM_END)
+                except Exception:
+                    pass
+                break
+            quarter_position = convert_beat_to_quarter(score_part, current_position)
+            position_manager.set_position(file_id, quarter_position)
     except Exception as e:
         logging.error(f"Error: {e}")
         traceback.print_exc()

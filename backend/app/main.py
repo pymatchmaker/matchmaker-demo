@@ -1,5 +1,6 @@
 import asyncio
 import shutil
+import threading
 import uuid
 import warnings
 from concurrent.futures import ThreadPoolExecutor
@@ -40,7 +41,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-executor = ThreadPoolExecutor(max_workers=1)
+executor = ThreadPoolExecutor(max_workers=2)
+# Track active stop_event so new sessions can cancel previous ones
+_active_stop_event: threading.Event | None = None
 
 
 # ================== API ==================
@@ -59,6 +62,14 @@ async def audio_devices():
 async def midi_devices():
     devices = get_midi_devices()
     return {"devices": devices}
+
+
+@app.get("/methods")
+async def methods():
+    return {
+        "audio": ["arzt", "dixon", "audio_outerhmm"],
+        "midi": ["arzt", "dixon", "hmm", "pthmm", "outerhmm"],
+    }
 
 
 @app.post("/upload")
@@ -135,20 +146,29 @@ async def get_performance(file_id: str):
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    global _active_stop_event
+
+    # Cancel any previous score following session
+    if _active_stop_event is not None:
+        _active_stop_event.set()
+
     position_manager.reset()
     await websocket.accept()
 
-    data = await websocket.receive_json()  # data: {"onset_beats": [0.5, 1, 1.5, ...]}
+    data = await websocket.receive_json()
     file_id = data.get("file_id")
     input_type = data.get("input_type", "audio")
     device = data.get("device")
-    print(device)
+    method = data.get("method", "audio_outerhmm")
     print(f"Received data: {data}")
 
-    # Run score following in a separate thread (as a background task)
+    stop_event = threading.Event()
+    _active_stop_event = stop_event
+
+    # Run score following in a separate thread
     loop = asyncio.get_event_loop()
     task = loop.run_in_executor(
-        executor, run_score_following, file_id, input_type, device
+        executor, run_score_following, file_id, input_type, device, method, stop_event
     )
 
     try:
@@ -164,14 +184,20 @@ async def websocket_endpoint(websocket: WebSocket):
             await asyncio.sleep(0.1)
 
             if task.done():
-                await websocket.send_json({"status": "completed"})
+                try:
+                    await websocket.send_json({"status": "completed"})
+                except Exception:
+                    pass
                 break
 
     except Exception as e:
-        print(f"Websocket send data error: {e}, {type(e)}")
-        position_manager.reset()
-        return
+        print(f"Websocket error: {e}")
     finally:
-        if websocket.client_state == WebSocketState.CONNECTED:
-            await websocket.close()
+        stop_event.set()
+        _active_stop_event = None
+        try:
+            if websocket.client_state == WebSocketState.CONNECTED:
+                await websocket.close()
+        except RuntimeError:
+            pass
         position_manager.reset()

@@ -21,6 +21,8 @@ const ScorePage: React.FC = () => {
   const [selectedAudioDevice, setSelectedAudioDevice] = useState<string>('');
   const [midiDevices, setMidiDevices] = useState<Array<{ index: number; name: string }>>([]);
   const [selectedMidiDevice, setSelectedMidiDevice] = useState<string>('');
+  const [availableMethods, setAvailableMethods] = useState<{ audio: string[]; midi: string[] }>({ audio: [], midi: [] });
+  const [selectedMethod, setSelectedMethod] = useState<string>('');
   const scoreRenderer = useRef<ScoreRenderer | null>(null);
   const ws = useRef<WebSocket | null>(null);
   const [isSimulationMode, setIsSimulationMode] = useState(false);
@@ -95,9 +97,23 @@ const ScorePage: React.FC = () => {
   }, [router.isReady, file_id]);
 
   useEffect(() => {
-    if (inputType === 'Audio') fetchAudioDevices();
-    else if (inputType === 'MIDI') fetchMidiDevices();
+    if (inputType === 'Audio') {
+      fetchAudioDevices();
+      fetchMethods();
+    } else if (inputType === 'MIDI') {
+      fetchMidiDevices();
+      fetchMethods();
+    }
   }, [inputType]);
+
+  // Update selected method when inputType or available methods change
+  useEffect(() => {
+    const key = inputType === 'Audio' ? 'audio' : 'midi';
+    const methods = availableMethods[key];
+    if (methods.length > 0 && !methods.includes(selectedMethod)) {
+      setSelectedMethod(methods[0]);
+    }
+  }, [inputType, availableMethods]);
 
   const playMusic = async () => {
     if (!scoreRenderer.current || !file_id) return;
@@ -119,6 +135,7 @@ const ScorePage: React.FC = () => {
         file_id,
         input_type,
         device: performanceSource ? '' : (inputType === 'Audio' ? selectedAudioDevice : selectedMidiDevice),
+        method: selectedMethod || undefined,
       }));
     };
 
@@ -158,6 +175,14 @@ const ScorePage: React.FC = () => {
       setMidiDevices(data.devices);
       if (data.devices.length > 0) setSelectedMidiDevice(data.devices[0].name);
     } catch (e) { console.error('Error fetching midi devices:', e); }
+  };
+
+  const fetchMethods = async () => {
+    try {
+      const res = await fetch(`${backendUrl}/methods`);
+      const data = await res.json();
+      setAvailableMethods(data);
+    } catch (e) { console.error('Error fetching methods:', e); }
   };
 
   if (error) {
@@ -228,6 +253,7 @@ const ScorePage: React.FC = () => {
 
             {!isSimulationMode && inputType === 'Audio' && (
               <div className="w-64">
+                <label className="block text-sm text-gray-500 mb-1">Device</label>
                 <select
                   value={selectedAudioDevice}
                   onChange={(e) => setSelectedAudioDevice(e.target.value)}
@@ -244,6 +270,7 @@ const ScorePage: React.FC = () => {
 
             {!isSimulationMode && inputType === 'MIDI' && (
               <div className="w-64">
+                <label className="block text-sm text-gray-500 mb-1">Device</label>
                 <select
                   value={selectedMidiDevice}
                   onChange={(e) => setSelectedMidiDevice(e.target.value)}
@@ -253,6 +280,23 @@ const ScorePage: React.FC = () => {
                 >
                   {midiDevices.map((device, index) => (
                     <option key={index} value={device.name}>{device.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {!isSimulationMode && inputType && (
+              <div className="w-64">
+                <label className="block text-sm text-gray-500 mb-1">Alignment algorithm</label>
+                <select
+                  value={selectedMethod}
+                  onChange={(e) => setSelectedMethod(e.target.value)}
+                  className="w-full px-4 py-2 rounded-md bg-white border border-gray-200
+                    shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500
+                    transition-all duration-200"
+                >
+                  {(availableMethods[inputType === 'Audio' ? 'audio' : 'midi'] || []).map((m) => (
+                    <option key={m} value={m}>{m}</option>
                   ))}
                 </select>
               </div>
