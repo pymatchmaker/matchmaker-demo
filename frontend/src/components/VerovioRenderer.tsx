@@ -40,6 +40,7 @@ export class VerovioRendererImpl implements ScoreRenderer {
   private timeIndexMap: { [key: number]: number } = {};
   private quarterToNoteId: Map<number, string> = new Map();
   private cursorRect: SVGRectElement | null = null;
+  private measureRect: SVGRectElement | null = null;
   private currentBeat = 0;
   private currentNoteId: string | null = null;
   private lastNoteTop?: number;
@@ -56,10 +57,12 @@ export class VerovioRendererImpl implements ScoreRenderer {
     await loadVerovio();
     this.toolkit = new VerovioToolkitClass(VerovioModule);
     this.toolkit.setOptions({
-      scale: 50,
+      scale: 30,
       pageWidth: 2000,
       pageHeight: 3000,
       adjustPageHeight: true,
+      minLastJustification: 0,
+      breaks: 'encoded',
     });
     if (!this.toolkit.loadData(content)) {
       throw new Error('Failed to load data into Verovio');
@@ -190,6 +193,26 @@ export class VerovioRendererImpl implements ScoreRenderer {
     const staffRange = this.getStaffYRangeInSystem(system);
     if (!staffRange) return;
 
+    // Measure highlight
+    const measureEl = noteEl.closest('g.measure') as SVGGraphicsElement | null;
+    if (measureEl) {
+      try {
+        const mb = measureEl.getBBox();
+        const mRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        mRect.setAttribute('x', mb.x.toString());
+        mRect.setAttribute('y', staffRange.y.toString());
+        mRect.setAttribute('width', mb.width.toString());
+        mRect.setAttribute('height', staffRange.height.toString());
+        mRect.setAttribute('fill', '#3b82f6');
+        mRect.setAttribute('opacity', '0.08');
+        mRect.setAttribute('class', 'verovio-measure-highlight');
+        mRect.style.pointerEvents = 'none';
+        pageMargin.appendChild(mRect);
+        this.measureRect = mRect;
+      } catch { /* skip */ }
+    }
+
+    // Note cursor
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     const width = 60;
     rect.setAttribute('x', (x - width / 2).toString());
@@ -213,6 +236,10 @@ export class VerovioRendererImpl implements ScoreRenderer {
   }
 
   private removeCursor(): void {
+    if (this.measureRect) {
+      this.measureRect.remove();
+      this.measureRect = null;
+    }
     if (this.cursorRect) {
       this.cursorRect.remove();
       this.cursorRect = null;

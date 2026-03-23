@@ -1,4 +1,4 @@
-import { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
+import { OpenSheetMusicDisplay, CursorType } from 'opensheetmusicdisplay';
 import { ScoreRenderer, NoteInfo } from '../utils/scoreRenderer';
 
 export class OSMDRendererImpl implements ScoreRenderer {
@@ -12,30 +12,30 @@ export class OSMDRendererImpl implements ScoreRenderer {
     this.osmd = new OpenSheetMusicDisplay(container, {
       autoResize: true,
       drawTitle: true,
+      cursorsOptions: [
+        { type: CursorType.Standard, color: '#33cc33', alpha: 0.6, follow: false },
+        { type: CursorType.CurrentArea, color: '#3b82f6', alpha: 0.1, follow: false },
+      ],
     });
     this.osmd.zoom = 0.5;
     this.osmd.EngravingRules.TitleTopDistance = 2;
     this.osmd.EngravingRules.SheetTitleHeight = 2.5;
     this.osmd.EngravingRules.SheetSubtitleHeight = 1.5;
     this.osmd.EngravingRules.SheetComposerHeight = 1.5;
+    this.osmd.EngravingRules.StretchLastSystemLine = true;
     this.osmd.EngravingRules.FixedMeasureWidth = false;
     this.onNotesRegistered = onNotesRegistered;
   }
 
   async load(content: string): Promise<void> {
-    if (!this.osmd) {
-      throw new Error('OSMD not initialized');
-    }
+    if (!this.osmd) throw new Error('OSMD not initialized');
     await this.osmd.load(content);
   }
 
   async render(): Promise<void> {
-    if (!this.osmd) {
-      throw new Error('OSMD not initialized');
-    }
+    if (!this.osmd) throw new Error('OSMD not initialized');
     await this.osmd.render();
     this.extractNotes();
-    
     if (this.onNotesRegistered) {
       this.onNotesRegistered(this.notes, this.timeIndexMap);
     }
@@ -66,10 +66,9 @@ export class OSMDRendererImpl implements ScoreRenderer {
       iterator.moveToNext();
     }
 
-    // Remove duplicates and build time-to-index map
     const uniqueNotes: NoteInfo[] = [];
     const timeIndexMapObj: { [key: number]: number } = {};
-    
+
     allNotes.forEach((note) => {
       if (!timeIndexMapObj.hasOwnProperty(note.time)) {
         uniqueNotes.push(note);
@@ -92,64 +91,39 @@ export class OSMDRendererImpl implements ScoreRenderer {
     const currentIndex = this.timeIndexMap[currentBeat];
     let targetIndex = this.timeIndexMap[targetBeat];
 
-    if (currentIndex === undefined) {
-      console.warn(`Invalid current beat position: ${currentBeat}`);
-      return;
-    }
+    if (currentIndex === undefined) return;
 
     if (targetIndex === undefined) {
-      // Find the closest position
       const beats = Object.keys(this.timeIndexMap).map(Number).sort((a, b) => a - b);
       const closestBeat = beats.findLast((beat) => beat <= targetBeat) || beats[0];
       targetIndex = this.timeIndexMap[closestBeat];
     }
 
     const steps = targetIndex - currentIndex;
+    const cursors = (this.osmd as any).cursors as any[];
 
     if (steps > 0) {
       for (let i = 0; i < steps; i++) {
-        this.osmd.cursor.next();
+        if (cursors) { for (const c of cursors) c.next(); }
+        else { this.osmd.cursor.next(); }
       }
     } else if (steps < 0) {
       for (let i = 0; i < Math.abs(steps); i++) {
-        this.osmd.cursor.previous();
+        if (cursors) { for (const c of cursors) c.previous(); }
+        else { this.osmd.cursor.previous(); }
       }
     }
 
-    this.osmd.cursor.update();
-    this.osmd.cursor.show();
+    if (cursors) {
+      for (const c of cursors) { c.update(); c.show(); }
+    } else {
+      this.osmd.cursor.update();
+      this.osmd.cursor.show();
+    }
 
+    // Auto-scroll only when system changes
     const cursorEl = this.osmd.cursor.cursorElement;
     if (cursorEl) {
-      // Dynamically set cursor height to match the current system's staff height
-      const cursorImg = cursorEl.querySelector('img') as HTMLImageElement | null;
-      if (cursorImg) {
-        const container = cursorEl.closest('#osmdContainer');
-        if (container) {
-          const staves = container.querySelectorAll('.vf-stave');
-          if (staves.length > 0) {
-            const cursorRect = cursorEl.getBoundingClientRect();
-
-            // Find staves in the same system (similar Y position)
-            let minY = Infinity, maxY = -Infinity;
-            staves.forEach((stave: Element) => {
-              const r = stave.getBoundingClientRect();
-              if (Math.abs(r.top - cursorRect.top) < 200) {
-                minY = Math.min(minY, r.top);
-                maxY = Math.max(maxY, r.bottom);
-              }
-            });
-
-            if (minY !== Infinity) {
-              const h = Math.round(maxY - minY);
-              cursorImg.height = h;
-              cursorImg.style.height = `${h}px`;
-            }
-          }
-        }
-      }
-
-      // Auto-scroll only when system changes
       const cursorTop = cursorEl.getBoundingClientRect().top;
       if (this.lastCursorTop === undefined || Math.abs(cursorTop - this.lastCursorTop) > 50) {
         cursorEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -159,37 +133,41 @@ export class OSMDRendererImpl implements ScoreRenderer {
   }
 
   highlightPosition(beat: number): void {
-    // OSMD uses cursor to indicate position, so this is handled in moveToPosition
     this.moveToPosition(beat);
   }
 
   getCurrentPosition(): number {
-    if (!this.osmd || !this.osmd.cursor || !this.osmd.cursor.Iterator) {
-      return 0;
-    }
+    if (!this.osmd || !this.osmd.cursor || !this.osmd.cursor.Iterator) return 0;
     return this.osmd.cursor.Iterator.currentTimeStamp.RealValue * 4;
   }
 
   reset(): void {
-    if (this.osmd && this.osmd.cursor) {
+    if (!this.osmd) return;
+    const cursors = (this.osmd as any).cursors as any[];
+    if (cursors) {
+      for (const c of cursors) c.reset();
+    } else if (this.osmd.cursor) {
       this.osmd.cursor.reset();
     }
   }
 
   show(): void {
-    if (this.osmd && this.osmd.cursor) {
+    if (!this.osmd) return;
+    const cursors = (this.osmd as any).cursors as any[];
+    if (cursors) {
+      for (const c of cursors) c.show();
+    } else if (this.osmd.cursor) {
       this.osmd.cursor.show();
     }
   }
 
   hide(): void {
-    if (this.osmd && this.osmd.cursor) {
+    if (!this.osmd) return;
+    const cursors = (this.osmd as any).cursors as any[];
+    if (cursors) {
+      for (const c of cursors) c.hide();
+    } else if (this.osmd.cursor) {
       this.osmd.cursor.hide();
     }
   }
-
-  getCursor() {
-    return this.osmd?.cursor;
-  }
 }
-

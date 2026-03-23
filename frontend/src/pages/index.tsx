@@ -15,6 +15,8 @@ const IndexPage: React.FC = () => {
     performanceFile?: File;
     fileName?: string;
     alignment?: Array<{time: number; position: number}>;
+    isPdf?: boolean;
+    pixelMapping?: any;
   }) => {
     const perfName = data.performanceFile?.name || '';
     const perfInputType = /\.(mid|midi)$/i.test(perfName) ? 'midi' : 'audio';
@@ -25,6 +27,8 @@ const IndexPage: React.FC = () => {
       has_performance_file: data.hasPerformanceFile,
       performance_input_type: data.hasPerformanceFile ? perfInputType : null,
       alignment: data.alignment || null,
+      is_pdf: data.isPdf || false,
+      pixel_mapping: data.pixelMapping || null,
     }));
     router.push(`/score/${data.file_id}`);
   };
@@ -37,14 +41,7 @@ const IndexPage: React.FC = () => {
 
       {/* Nav */}
       <nav className="flex items-center justify-between px-8 py-5 relative z-10">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-black rounded-lg flex items-center justify-center">
-            <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
-            </svg>
-          </div>
-          <span className="text-lg font-semibold tracking-tight">Matchmaker</span>
-        </div>
+        <span className="text-sm font-medium text-gray-700">Score Following <span className="text-gray-400 font-normal">with Matchmaker</span></span>
         <a
           href="https://github.com/pymatchmaker/matchmaker"
           target="_blank"
@@ -63,6 +60,9 @@ const IndexPage: React.FC = () => {
           <h1 className="text-5xl font-bold tracking-tight text-gray-900">
             Score Following App
           </h1>
+          <p className="text-lg text-gray-400 mt-2">
+            with <a href="https://github.com/pymatchmaker/matchmaker" target="_blank" rel="noopener noreferrer" className="text-gray-500 hover:text-gray-700 underline underline-offset-2">Matchmaker</a>
+          </p>
         </div>
 
         <div className="w-full max-w-xl">
@@ -72,7 +72,7 @@ const IndexPage: React.FC = () => {
 
       {/* Footer */}
       <div className="text-center py-6 text-xs text-gray-400">
-        Supports MusicXML and MEI formats
+        Supports MusicXML, MEI, and PDF formats
       </div>
     </div>
   );

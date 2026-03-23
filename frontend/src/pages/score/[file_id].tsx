@@ -6,6 +6,7 @@ import CustomAudioPlayer, { AudioPlayerRef } from '../../components/AudioPlayer'
 import { ScoreRenderer } from '../../utils/scoreRenderer';
 import { OSMDRendererImpl } from '../../components/OSMDRenderer';
 import { VerovioRendererImpl } from '../../components/VerovioRenderer';
+import { ImageRendererImpl } from '../../components/ImageRenderer';
 
 const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
 
@@ -44,6 +45,8 @@ const ScorePage: React.FC = () => {
       let perfType: 'audio' | 'midi' = 'audio';
 
       let alignment: Array<{time: number; position: number}> | null = null;
+      let isPdf = false;
+      let pixelMapping: any = null;
 
       // 1) Try sessionStorage first (immediate after upload)
       const cached = sessionStorage.getItem(`score_${file_id}`);
@@ -54,6 +57,8 @@ const ScorePage: React.FC = () => {
         hasPerformance = data.has_performance_file;
         perfType = data.performance_input_type || 'audio';
         alignment = data.alignment || null;
+        isPdf = data.is_pdf || false;
+        pixelMapping = data.pixel_mapping || null;
       } else {
         // 2) Fallback: fetch from server (page refresh)
         try {
@@ -66,6 +71,14 @@ const ScorePage: React.FC = () => {
           fileContent = data.file_content;
           fileName = data.file_name;
           hasPerformance = data.has_performance_file;
+          isPdf = data.is_pdf || false;
+
+          if (isPdf) {
+            try {
+              const pmRes = await fetch(`${backendUrl}/score/${file_id}/pixel-mapping`);
+              if (pmRes.ok) pixelMapping = await pmRes.json();
+            } catch { /* no pixel mapping */ }
+          }
 
           // Try to fetch precomputed alignment
           try {
@@ -81,21 +94,26 @@ const ScorePage: React.FC = () => {
         }
       }
 
-      if (!fileContent || !vfRef.current) {
-        setError('No score content available');
+      if (!vfRef.current) {
+        setError('Container not available');
         return;
       }
 
       try {
-        // Select renderer based on file extension
-        const isMei = fileName.toLowerCase().endsWith('.mei');
-        if (isMei) {
+        // Select renderer
+        if (isPdf && pixelMapping) {
+          const imageUrl = `${backendUrl}/score/${file_id}/image`;
+          scoreRenderer.current = new ImageRendererImpl(vfRef.current, imageUrl, pixelMapping);
+        } else if (!fileContent) {
+          setError('No score content available');
+          return;
+        } else if (fileName.toLowerCase().endsWith('.mei')) {
           scoreRenderer.current = new VerovioRendererImpl(vfRef.current);
         } else {
           scoreRenderer.current = new OSMDRendererImpl(vfRef.current);
         }
 
-        await scoreRenderer.current.load(fileContent);
+        await scoreRenderer.current.load(fileContent || '');
         await scoreRenderer.current.render();
         scoreRenderer.current.reset();
         scoreRenderer.current.show();
@@ -292,8 +310,17 @@ const ScorePage: React.FC = () => {
 
       <div className="flex-1 pb-32">
         {isLoading ? (
-          <div className="flex items-center justify-center py-16">
-            <div className="text-gray-500 text-lg">{loadingMessage}</div>
+          <div className="flex flex-col items-center justify-center py-20 gap-4">
+            <div className="flex gap-1.5">
+              {[0, 1, 2, 3].map((i) => (
+                <div
+                  key={i}
+                  className="w-2 h-2 bg-gray-400 rounded-full loading-dot"
+                  style={{ animationDelay: `${i * 0.2}s` }}
+                />
+              ))}
+            </div>
+            <p className="text-gray-400 text-sm">{loadingMessage}</p>
           </div>
         ) : (
           <div className="flex justify-center py-3 px-4">

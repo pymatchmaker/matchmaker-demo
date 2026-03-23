@@ -87,7 +87,7 @@ async def methods():
 
 
 @app.post("/upload")
-async def upload_file(
+def upload_file(
     file: UploadFile = File(...), performance_file: UploadFile = File(None)
 ):
     file_id = str(uuid.uuid4())[:8]
@@ -118,14 +118,35 @@ async def upload_file(
             except Exception as e:
                 print(f"MIDI to WAV conversion failed: {e}")
 
-    musicxml_path = preprocess_score(file_path)
+    preprocess_result = preprocess_score(file_path, file_id=file_id)
 
-    # If MEI was converted to MusicXML, include the converted content in the response
-    result = {"file_id": file_id}
-    if musicxml_path and musicxml_path.exists():
-        result["musicxml_content"] = musicxml_path.read_text(encoding="utf-8")
+    result: dict = {"file_id": file_id}
+
+    if isinstance(preprocess_result, dict) and preprocess_result.get("type") == "pdf":
+        result["is_pdf"] = True
+        if preprocess_result.get("pixel_mapping"):
+            result["pixel_mapping"] = preprocess_result["pixel_mapping"]
+    elif isinstance(preprocess_result, Path) and preprocess_result.exists():
+        result["musicxml_content"] = preprocess_result.read_text(encoding="utf-8")
 
     return result
+
+
+@app.get("/score/{file_id}/image")
+async def get_score_image(file_id: str):
+    png_path = Path("./uploads") / f"{file_id}_score.png"
+    if not png_path.exists():
+        raise HTTPException(status_code=404, detail="Score image not found")
+    return FileResponse(str(png_path), media_type="image/png")
+
+
+@app.get("/score/{file_id}/pixel-mapping")
+async def get_pixel_mapping(file_id: str):
+    import json as json_mod
+    mapping_path = Path("./uploads") / f"{file_id}_pixel_mapping.json"
+    if not mapping_path.exists():
+        raise HTTPException(status_code=404, detail="Pixel mapping not found")
+    return json_mod.loads(mapping_path.read_text())
 
 
 @app.post("/score/{file_id}/alignment")

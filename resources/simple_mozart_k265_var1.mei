@@ -158,7 +158,7 @@
               </staff>
               <slur xml:id="slvfzqg" startid="#ntxcy85" curvedir="above" endid="#nexip1w"/>
             </measure>
-            <sb type="mscore-manual"/>
+            <sb/>
             <measure xml:id="m1h2nxzc" n="5">
               <staff xml:id="m5s1" n="1">
                 <layer xml:id="m5s1l1" n="1">

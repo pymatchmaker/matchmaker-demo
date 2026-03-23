@@ -1,58 +1,89 @@
-# score-following-app
+# Score Following App
 
-This is a simple score following app that reads a score file (MusicXML) and displays the aligned position in real-time using an Audio/MIDI input device. For the core alignment algorithm, we use the a [pymatchmaker](https://github.com/pymatchmaker/matchmaker), python library for real-time music alignment. (ISMIR 2024 Late Breaking Demo)
+A web application for real-time score following. Upload a music score (MusicXML, MEI, or PDF) and follow along as you play, with synchronized highlighting powered by [Matchmaker](https://github.com/pymatchmaker/matchmaker) (ISMIR 2024 Late Breaking Demo).
+
+## Features
+
+- **Real-time score following** with Audio or MIDI input
+- **Multiple alignment algorithms**: arzt, dixon, hmm, pthmm, outerhmm, audio_outerhmm
+- **Simulation mode**: upload a performance file (audio/MIDI) and play back with pre-computed alignment
+- **Score formats**: MusicXML, MEI (via Verovio), PDF (via Audiveris OMR)
+- **Visual feedback**: note cursor + measure highlighting
 
 ## Pre-requisites
 
-- Available Python version: 3.9 (other versions will be supported soon!)
-- [Fluidsynth](https://www.fluidsynth.org/)
-- [PortAudio](https://www.portaudio.com/)
+- Python 3.12 (conda recommended)
+- Node.js 20+
+- FluidSynth and PortAudio (system libraries required by `pyfluidsynth` and `pyaudio`)
+- [Audiveris](https://github.com/Audiveris/audiveris) (optional, for PDF score support — download from [releases](https://github.com/Audiveris/audiveris/releases), no separate Java installation needed)
 
 ```bash
+# macOS
+brew install fluidsynth portaudio
+
 # Linux
-$ sudo apt-get install fluidsynth && sudo apt-get install portaudio19-dev
-
-# MacOS
-$ brew install fluidsynth && brew install portaudio
+sudo apt-get install fluidsynth portaudio19-dev
 ```
 
-## Setting Backend environment
+## Setup
 
-Tested on Python 3.9 (conda)
+### Backend
 
 ```bash
-$ cd backend/
-$ conda create -n sfa python=3.9
-$ conda activate sfa
-$ pip install -r requirements.txt
+conda create -n matchmaker-demo python=3.12
+conda activate matchmaker-demo
+cd backend/
+pip install -r requirements.txt
 ```
 
-## Setting Frontend environment
+### Frontend
 
 ```bash
-$ cd frontend/
-$ npm install
-
-# Create .env.local
-$ echo "NEXT_PUBLIC_BACKEND_URL=http://127.0.0.1:8000" > .env.local
+cd frontend/
+npm install
 ```
 
-## Running the app
+## Running
 
 ```bash
-$ cd backend/
-$ ./start_app.sh  # Server will start at http://localhost:8000/
+# Start both backend and frontend
+./start_app.sh
 ```
 
-Note: The first server startup might take longer as it downloads required soundfonts from `partitura` library.
+Or start separately:
 
 ```bash
-$ cd frontend/
-$ npm start  # Client will start at http://localhost:50003/
+# Backend (http://localhost:8000)
+cd backend/
+conda activate matchmaker-demo
+uvicorn app.main:app --reload --port 8000
+
+# Frontend (http://localhost:50003)
+cd frontend/
+npm start
 ```
 
-Now you can access the app at `http://localhost:50003/` in your browser.
+Open http://localhost:50003 in your browser.
+
+> The first startup may take longer as `partitura` downloads required soundfonts.
+
+## Usage
+
+1. **Upload a score** — MusicXML (.xml, .musicxml), MEI (.mei), or PDF (.pdf)
+2. **Optionally add a performance file** — audio (.mp3, .wav) or MIDI (.mid) for simulation mode
+3. **Select input type and algorithm** — choose Audio/MIDI device and alignment method
+4. **Play** — the score cursor follows your performance in real-time
+
+### Simulation mode
+
+Upload a pre-recorded performance file alongside the score to run in simulation mode. Instead of listening to a live input, the app:
+
+1. Runs the selected alignment algorithm offline against the performance file
+2. Produces a time-aligned mapping between the audio/MIDI and the score positions
+3. Plays back the performance audio with synchronized score highlighting
+
+Select an algorithm and click **Run Simulation** to compute the alignment. Once complete, press **Play** to start playback. The score cursor and measure highlight move in sync with the audio. You can switch algorithms and re-run to compare different alignment results.
 
 ## Demo video
 
-https://github.com/user-attachments/assets/a8010f8b-45a1-4be5-8cd1-f65a9601f8eb
+<video src="video/demo-video.mp4" controls width="100%"></video>

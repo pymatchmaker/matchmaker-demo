@@ -9,6 +9,8 @@ interface FileUploadProps {
     performanceFile?: File;
     fileName?: string;
     alignment?: Array<{time: number; position: number}>;
+    isPdf?: boolean;
+    pixelMapping?: any;
   }) => void;
 }
 
@@ -46,11 +48,14 @@ const FileUpload: React.FC<FileUploadProps> = ({ backendUrl, onFileUpload }) => 
       setUploadProgress(60);
       const data = await response.json();
 
-      const fileContent = await new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onload = (e) => resolve(e.target?.result as string);
-        reader.readAsText(scoreFile);
-      });
+      let fileContent = '';
+      if (!scoreFile.name.toLowerCase().endsWith('.pdf')) {
+        fileContent = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target?.result as string);
+          reader.readAsText(scoreFile);
+        });
+      }
 
       setUploadProgress(100);
 
@@ -61,6 +66,8 @@ const FileUpload: React.FC<FileUploadProps> = ({ backendUrl, onFileUpload }) => 
         performanceFile: audioFile || undefined,
         fileName: scoreFile.name,
         alignment: data.alignment || undefined,
+        isPdf: data.is_pdf || false,
+        pixelMapping: data.pixel_mapping || undefined,
       });
 
     } catch (error) {
@@ -118,7 +125,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ backendUrl, onFileUpload }) => 
         <input
           ref={scoreInputRef}
           type="file"
-          accept=".xml,.musicxml,.mei"
+          accept=".xml,.musicxml,.mei,.pdf"
           onChange={(e) => e.target.files?.[0] && setScoreFile(e.target.files[0])}
           className="hidden"
         />

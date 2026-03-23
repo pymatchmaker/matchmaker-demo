@@ -25,7 +25,17 @@
 
 img[id^="cursorImg-"] {
   z-index: 2 !important;
-  height: 150px !important;
+  height: 125px !important;
   opacity: 0.6 !important;
+}
+
+/* Loading dot animation */
+@keyframes loading-dot {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 1; }
+}
+
+.loading-dot {
+  animation: loading-dot 1.4s ease-in-out infinite;
 }
 

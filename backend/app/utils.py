@@ -1,7 +1,12 @@
+import json
 import logging
+import shutil
+import subprocess
 import threading
 import traceback
 import xml.etree.ElementTree as ET
+import zipfile
+from fractions import Fraction
 from pathlib import Path
 from typing import Optional
 
@@ -591,21 +596,163 @@ def enrich_musicxml_from_mei(musicxml_path: Path, mei_path: Path) -> None:
     logging.info(f"Enriched MusicXML with MEI metadata: {musicxml_path}")
 
 
-def preprocess_score(score_xml: Path) -> Optional[Path]:
-    """
-    Preprocess the score xml file to midi and audio file.
-    For MEI files, also converts to MusicXML for frontend rendering.
+AUDIVERIS_JAVA = "/Applications/Audiveris.app/Contents/runtime/Contents/Home/bin/java"
+AUDIVERIS_APP_DIR = "/Applications/Audiveris.app/Contents/app"
 
-    Parameters
-    ----------
-    score_xml : Path
-        Path to the score xml file
 
-    Returns
-    -------
-    Optional[Path]
-        Path to converted MusicXML file if original was MEI, None otherwise
+def process_pdf_with_audiveris(pdf_path: Path, file_id: str) -> Optional[dict]:
+    """Run Audiveris OMR on a PDF, extract PNG + pixel mapping + MXL."""
+    upload_dir = Path("./uploads")
+    output_dir = upload_dir / f"{file_id}_audiveris"
+    output_dir.mkdir(exist_ok=True)
+
+    # Build classpath
+    jars = ":".join(str(p) for p in Path(AUDIVERIS_APP_DIR).glob("*.jar"))
+
+    try:
+        result = subprocess.run(
+            [AUDIVERIS_JAVA, "-cp", jars, "Audiveris",
+             "-batch", "-transcribe", "-export",
+             "-output", str(output_dir), "--", str(pdf_path)],
+            capture_output=True, text=True, timeout=120,
+        )
+        logging.info(f"Audiveris stdout: {result.stdout[-200:]}")
+        if result.returncode != 0:
+            logging.error(f"Audiveris stderr: {result.stderr[-500:]}")
+    except subprocess.TimeoutExpired:
+        logging.error("Audiveris timed out")
+        return None
+
+    # Find .omr file
+    omr_files = list(output_dir.glob("*.omr"))
+    if not omr_files:
+        logging.error("No .omr file produced by Audiveris")
+        return None
+    omr_path = omr_files[0]
+
+    # Find .mxl file
+    mxl_files = list(output_dir.glob("*.mxl"))
+    mxl_dest = None
+    if mxl_files:
+        mxl_dest = upload_dir / f"{file_id}_score.mxl"
+        shutil.copy(mxl_files[0], mxl_dest)
+
+    # Extract from .omr ZIP
+    png_dest = upload_dir / f"{file_id}_score.png"
+    pixel_mapping = None
+
+    with zipfile.ZipFile(omr_path) as zf:
+        # Extract BINARY.png
+        for name in zf.namelist():
+            if name.endswith("BINARY.png"):
+                with zf.open(name) as src, open(png_dest, "wb") as dst:
+                    dst.write(src.read())
+                break
+
+        # Parse sheet XML for pixel mapping
+        for name in zf.namelist():
+            if name.endswith(".xml") and "sheet" in name and "book" not in name:
+                with zf.open(name) as f:
+                    pixel_mapping = _parse_omr_pixel_mapping(f.read())
+                break
+
+    if pixel_mapping:
+        # Add image dimensions
+        pic_width, pic_height = 0, 0
+        with zipfile.ZipFile(omr_path) as zf:
+            for name in zf.namelist():
+                if name.endswith(".xml") and "sheet" in name and "book" not in name:
+                    with zf.open(name) as f:
+                        root = ET.parse(f).getroot()
+                        pic = root.find("picture")
+                        if pic is not None:
+                            pic_width = int(pic.get("width", 0))
+                            pic_height = int(pic.get("height", 0))
+                    break
+        pixel_mapping["image_width"] = pic_width
+        pixel_mapping["image_height"] = pic_height
+
+        mapping_path = upload_dir / f"{file_id}_pixel_mapping.json"
+        mapping_path.write_text(json.dumps(pixel_mapping))
+
+    # Cleanup temp dir
+    shutil.rmtree(output_dir, ignore_errors=True)
+
+    return {
+        "mxl_path": mxl_dest,
+        "png_path": png_dest if png_dest.exists() else None,
+        "pixel_mapping": pixel_mapping,
+    }
+
+
+def _parse_omr_pixel_mapping(xml_bytes: bytes) -> dict:
+    """Parse Audiveris sheet XML to build quarter_position → pixel coordinate mapping."""
+    root = ET.fromstring(xml_bytes)
+    entries = []
+    measure_quarter = Fraction(0)
+
+    for system in root.findall(".//page/system"):
+        # Get staff Y ranges for this system
+        staff_ys = []
+        for part in system.findall("part"):
+            for staff in part.findall("staff"):
+                for line in staff.findall(".//line"):
+                    for point in line.findall("point"):
+                        staff_ys.append(int(point.get("y")))
+
+        sys_top = min(staff_ys) if staff_ys else 0
+        sys_bottom = max(staff_ys) if staff_ys else 0
+
+        for stack in system.findall("stack"):
+            stack_left = int(stack.get("left"))
+            stack_right = int(stack.get("right"))
+            duration = Fraction(stack.get("duration"))
+
+            for slot in stack.findall("slot"):
+                x_offset = int(slot.get("x-offset"))
+                time_frac = Fraction(slot.get("time-offset"))
+
+                abs_x = stack_left + x_offset
+                abs_quarter = float(measure_quarter + time_frac * 4)
+
+                entries.append({
+                    "quarter": round(abs_quarter, 4),
+                    "x": abs_x,
+                    "measure_left": stack_left,
+                    "measure_right": stack_right,
+                    "system_top": sys_top,
+                    "system_bottom": sys_bottom,
+                })
+
+            measure_quarter += duration * 4
+
+    return {"entries": entries}
+
+
+def preprocess_score(score_xml: Path, file_id: str = "") -> Optional[dict | Path]:
     """
+    Preprocess the score file to midi and audio.
+    Returns dict for PDF, Path for MEI->MusicXML conversion, None for MusicXML.
+    """
+    # PDF: run Audiveris OMR
+    if score_xml.suffix.lower() == ".pdf":
+        if not file_id:
+            file_id = score_xml.stem.split("_")[0]
+        result = process_pdf_with_audiveris(score_xml, file_id)
+        if not result or not result.get("mxl_path"):
+            raise ValueError("Audiveris failed to process PDF")
+
+        # Generate MIDI and WAV from the MXL
+        mxl_path = result["mxl_path"]
+        score_obj = partitura.load_score(str(mxl_path))
+        midi_path = f"./uploads/{mxl_path.stem}.mid"
+        partitura.save_score_midi(score_obj, midi_path)
+        wav_path = f"./uploads/{mxl_path.stem}.wav"
+        partitura.save_wav_fluidsynth(score_obj, wav_path)
+        logging.info(f"PDF preprocessed: MIDI={midi_path}, WAV={wav_path}")
+
+        return {"type": "pdf", **result}
+
     # Special handling for MEI files
     if score_xml.suffix.lower() == ".mei":
         try:
@@ -662,7 +809,7 @@ def preprocess_score(score_xml: Path) -> Optional[Path]:
 def find_score_file_by_id(file_id: str, directory: Path = Path("./uploads")) -> Path:
     for file in directory.iterdir():
         if file.is_file() and file.stem.startswith(file_id):
-            if file.suffix in [".xml", ".mei", ".musicxml"]:
+            if file.suffix in [".xml", ".mei", ".musicxml", ".mxl"]:
                 return file
             elif file.suffix in [".mid", ".midi"]:
                 return file
