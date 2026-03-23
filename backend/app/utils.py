@@ -815,10 +815,13 @@ def run_precomputed_alignment(file_id: str, method: str = "audio_outerhmm") -> O
     for beat_pos in positions:
         quarter_positions.append(convert_beat_to_quarter(score_part, beat_pos))
 
-    # Determine time scale: use actual WAV duration / max quarter position
-    max_quarter = max(quarter_positions) if quarter_positions else 1.0
-    if input_type == "midi" and perf_duration and max_quarter > 0:
-        sec_per_quarter = perf_duration / max_quarter
+    # Determine time scale: use actual WAV duration / score's total quarter length
+    # Use score's last quarter (not alignment output) so all methods map consistently
+    import numpy as np
+    na = score_part.note_array()
+    score_end_quarter = float(np.max(na['onset_quarter'] + na['duration_quarter']))
+    if input_type == "midi" and perf_duration and score_end_quarter > 0:
+        sec_per_quarter = perf_duration / score_end_quarter
     else:
         sec_per_quarter = None
 
