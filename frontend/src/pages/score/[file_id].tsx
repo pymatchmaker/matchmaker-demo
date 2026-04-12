@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
 import Head from 'next/head';
@@ -19,11 +19,7 @@ const ScorePage: React.FC = () => {
   const [loadingMessage, setLoadingMessage] = useState('Loading score...');
   const [error, setError] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [inputType, setInputType] = useState<'MIDI' | 'Audio' | ''>('');
-  const [audioDevices, setAudioDevices] = useState<Array<{ index: number; name: string }>>([]);
-  const [selectedAudioDevice, setSelectedAudioDevice] = useState<string>('');
-  const [midiDevices, setMidiDevices] = useState<Array<{ index: number; name: string }>>([]);
-  const [selectedMidiDevice, setSelectedMidiDevice] = useState<string>('');
+  const [inputType, setInputType] = useState<'audio' | 'midi' | ''>('');
   const [availableMethods, setAvailableMethods] = useState<{ audio: string[]; midi: string[] }>({ audio: [], midi: [] });
   const [selectedMethod, setSelectedMethod] = useState<string>('');
   const scoreRenderer = useRef<ScoreRenderer | null>(null);
@@ -34,6 +30,69 @@ const ScorePage: React.FC = () => {
   const [alignmentData, setAlignmentData] = useState<Array<{time: number; position: number}> | null>(null);
   const audioPlayerRef = useRef<AudioPlayerRef>(null);
   const animFrameRef = useRef<number | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const workletNodeRef = useRef<AudioWorkletNode | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const levelAnimRef = useRef<number | null>(null);
+  const [browserAudioStatus, setBrowserAudioStatus] = useState<'idle' | 'connecting' | 'listening' | 'initializing' | 'countdown' | 'active'>('idle');
+  const backendReadyRef = useRef(false);
+  const [countdownNumber, setCountdownNumber] = useState(0);
+  const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const sendingRef = useRef(false);
+  const [audioLevel, setAudioLevel] = useState(0);
+  const midiAccessRef = useRef<MIDIAccess | null>(null);
+  const midiInputRef = useRef<MIDIInput | null>(null);
+  const [midiInputs, setMidiInputs] = useState<Array<{ id: string; name: string }>>([]);
+  const [selectedMidiInput, setSelectedMidiInput] = useState<string>('');
+  const [midiMessageCount, setMidiMessageCount] = useState(0);
+  const midiStartTimeRef = useRef<number>(0);
+
+  const playTick = useCallback(() => {
+    try {
+      const ctx = new AudioContext();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.value = 1000;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.08);
+      osc.onended = () => ctx.close();
+    } catch { /* ignore audio errors */ }
+  }, []);
+
+  const startCountdown = useCallback(() => {
+    setBrowserAudioStatus('countdown');
+    let remaining = 4;
+    setCountdownNumber(remaining);
+    playTick();
+
+    countdownTimerRef.current = setInterval(() => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+        countdownTimerRef.current = null;
+        setCountdownNumber(0);
+        sendingRef.current = true;
+        setBrowserAudioStatus('active');
+      } else {
+        setCountdownNumber(remaining);
+        playTick();
+      }
+    }, 1000);
+  }, [playTick]);
+
+  const cleanupCountdown = useCallback(() => {
+    if (countdownTimerRef.current) {
+      clearInterval(countdownTimerRef.current);
+      countdownTimerRef.current = null;
+    }
+    setCountdownNumber(0);
+  }, []);
 
   useEffect(() => {
     if (!router.isReady || !file_id) return;
@@ -136,20 +195,14 @@ const ScorePage: React.FC = () => {
   }, [router.isReady, file_id]);
 
   useEffect(() => {
-    if (isSimulationMode) {
-      fetchMethods();
-    } else if (inputType === 'Audio') {
-      fetchAudioDevices();
-      fetchMethods();
-    } else if (inputType === 'MIDI') {
-      fetchMidiDevices();
+    if (isSimulationMode || inputType) {
       fetchMethods();
     }
   }, [inputType, isSimulationMode]);
 
   // Update selected method when inputType or available methods change
   useEffect(() => {
-    const key = isSimulationMode ? performanceInputType : (inputType === 'Audio' ? 'audio' : 'midi');
+    const key = isSimulationMode ? performanceInputType : (inputType === 'midi' ? 'midi' : 'audio');
     const methods = availableMethods[key];
     if (methods.length > 0 && !methods.includes(selectedMethod)) {
       setSelectedMethod(methods[0]);
@@ -189,6 +242,63 @@ const ScorePage: React.FC = () => {
     }
   };
 
+  const cleanupBrowserAudio = () => {
+    if (levelAnimRef.current !== null) {
+      cancelAnimationFrame(levelAnimRef.current);
+      levelAnimRef.current = null;
+    }
+    if (analyserRef.current) {
+      analyserRef.current.disconnect();
+      analyserRef.current = null;
+    }
+    if (workletNodeRef.current) {
+      workletNodeRef.current.disconnect();
+      workletNodeRef.current = null;
+    }
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach(track => track.stop());
+      mediaStreamRef.current = null;
+    }
+    backendReadyRef.current = false;
+
+    sendingRef.current = false;
+    cleanupCountdown();
+    setBrowserAudioStatus('idle');
+    setAudioLevel(0);
+  };
+
+  const cleanupBrowserMidi = () => {
+    if (midiInputRef.current) {
+      midiInputRef.current.onmidimessage = null;
+      midiInputRef.current = null;
+    }
+    if (midiAccessRef.current) {
+      midiAccessRef.current = null;
+    }
+    backendReadyRef.current = false;
+
+    sendingRef.current = false;
+    cleanupCountdown();
+    setBrowserAudioStatus('idle');
+    setMidiMessageCount(0);
+  };
+
+  // Cleanup browser audio/midi on unmount
+  useEffect(() => {
+    return () => {
+      cleanupBrowserAudio();
+      cleanupBrowserMidi();
+      if (ws.current) {
+        ws.current.close();
+        ws.current = null;
+      }
+    };
+  }, []);
+
   const playMusic = async () => {
     if (!scoreRenderer.current || !file_id) return;
 
@@ -210,29 +320,223 @@ const ScorePage: React.FC = () => {
       return;
     }
 
-    // Live mode: WebSocket
-    const wsUrl = `${backendUrl.replace(/^http/, 'ws')}/ws`;
-    ws.current = new WebSocket(wsUrl);
+    // Browser audio streaming mode
+    if (inputType === 'audio') {
+      try {
+        setBrowserAudioStatus('connecting');
 
-    ws.current.onopen = () => {
-      const input_type = inputType === 'MIDI' ? 'midi' : 'audio';
-      ws.current?.send(JSON.stringify({
-        file_id,
-        input_type,
-        device: inputType === 'Audio' ? selectedAudioDevice : selectedMidiDevice,
-        method: selectedMethod || undefined,
-      }));
-    };
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            sampleRate: 44100,
+            channelCount: 1,
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+          },
+        });
+        mediaStreamRef.current = stream;
 
-    ws.current.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.beat_position !== undefined) {
-        scoreRenderer.current?.moveToPosition(data.beat_position);
+        const audioCtx = new AudioContext({ sampleRate: 44100 });
+        audioContextRef.current = audioCtx;
+
+        // Set up audio level meter
+        const analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 256;
+        analyserRef.current = analyser;
+        const source = audioCtx.createMediaStreamSource(stream);
+        source.connect(analyser);
+
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        const updateLevel = () => {
+          analyser.getByteFrequencyData(dataArray);
+          let sum = 0;
+          for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+          setAudioLevel(sum / dataArray.length / 255);
+          levelAnimRef.current = requestAnimationFrame(updateLevel);
+        };
+        levelAnimRef.current = requestAnimationFrame(updateLevel);
+
+        // Set up audio worklet for streaming
+        await audioCtx.audioWorklet.addModule('/audio-worklet-processor.js');
+        const workletNode = new AudioWorkletNode(audioCtx, 'pcm-capture-processor');
+        workletNodeRef.current = workletNode;
+        source.connect(workletNode);
+
+        setBrowserAudioStatus('listening');
+
+        // Connect WebSocket
+        const wsUrl = `wss://${window.location.host}/ws/audio-stream`;
+        ws.current = new WebSocket(wsUrl);
+
+        ws.current.onopen = () => {
+          ws.current?.send(JSON.stringify({
+            file_id,
+            method: selectedMethod || undefined,
+          }));
+          setBrowserAudioStatus('initializing');
+        };
+
+        workletNode.port.onmessage = (event) => {
+          if (!sendingRef.current) return;
+          if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+            const float32 = event.data as Float32Array;
+            ws.current.send(float32.buffer);
+          }
+        };
+
+        ws.current.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          if (data.status === 'ready') {
+            backendReadyRef.current = true;
+            startCountdown();
+            return;
+          }
+          if (data.status === 'stream_started') {
+            return;
+          }
+          if (data.status === 'completed') {
+            stopMusic();
+            return;
+          }
+          if (data.beat_position !== undefined) {
+            scoreRenderer.current?.moveToPosition(data.beat_position);
+          }
+        };
+
+        ws.current.onclose = () => {
+          cleanupBrowserAudio();
+          setIsPlaying(false);
+        };
+        ws.current.onerror = () => {
+          cleanupBrowserAudio();
+          setIsPlaying(false);
+        };
+      } catch (e) {
+        console.error('[Browser Audio] Error:', e);
+        alert(`Browser audio error: ${e}`);
+        cleanupBrowserAudio();
+        setIsPlaying(false);
       }
-    };
+      return;
+    }
 
-    ws.current.onclose = () => setIsPlaying(false);
-    ws.current.onerror = () => setIsPlaying(false);
+    // Browser MIDI streaming mode
+    if (inputType === 'midi') {
+      try {
+        setBrowserAudioStatus('connecting');
+        setMidiMessageCount(0);
+
+        const midiAccess = await navigator.requestMIDIAccess();
+        midiAccessRef.current = midiAccess;
+
+        // Gather available MIDI inputs
+        const inputs: Array<{ id: string; name: string }> = [];
+        midiAccess.inputs.forEach((input) => {
+          inputs.push({ id: input.id, name: input.name || `MIDI Input ${input.id}` });
+        });
+        setMidiInputs(inputs);
+
+        if (inputs.length === 0) {
+          alert('No MIDI input devices found. Please connect a MIDI device and try again.');
+          cleanupBrowserMidi();
+          setIsPlaying(false);
+          return;
+        }
+
+        // Auto-select first input if none selected
+        const targetId = selectedMidiInput || inputs[0].id;
+        if (!selectedMidiInput) setSelectedMidiInput(targetId);
+
+        let foundInput: MIDIInput | undefined;
+        midiAccess.inputs.forEach((input) => {
+          if (input.id === targetId) foundInput = input;
+        });
+        if (!foundInput) {
+          alert('Selected MIDI input not found.');
+          cleanupBrowserMidi();
+          setIsPlaying(false);
+          return;
+        }
+        const midiInput = foundInput;
+        midiInputRef.current = midiInput;
+
+        setBrowserAudioStatus('listening');
+
+        // Connect WebSocket
+        const wsUrl = `wss://${window.location.host}/ws/audio-stream`;
+        ws.current = new WebSocket(wsUrl);
+
+        ws.current.onopen = () => {
+          ws.current?.send(JSON.stringify({
+            file_id,
+            method: selectedMethod || undefined,
+            input_type: 'midi',
+          }));
+          midiStartTimeRef.current = performance.now();
+          setBrowserAudioStatus('initializing');
+        };
+
+        // Listen for MIDI messages
+        midiInput.onmidimessage = (event: MIDIMessageEvent) => {
+          if (!sendingRef.current) return;
+          if (!event.data || event.data.length < 3) return;
+          const statusByte = event.data[0];
+          const data1 = event.data[1];
+          const data2 = event.data[2];
+
+          // Only forward note_on (0x90) and note_off (0x80) messages
+          const msgType = statusByte & 0xF0;
+          if (msgType !== 0x90 && msgType !== 0x80) return;
+
+          const relativeTime = (performance.now() - midiStartTimeRef.current) / 1000;
+
+          if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+            ws.current.send(JSON.stringify({
+              type: 'midi',
+              status: statusByte,
+              note: data1,
+              velocity: data2,
+              time: relativeTime,
+            }));
+            setMidiMessageCount((c) => c + 1);
+          }
+        };
+
+        ws.current.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          if (data.status === 'ready') {
+            backendReadyRef.current = true;
+            startCountdown();
+            return;
+          }
+          if (data.status === 'stream_started') {
+            return;
+          }
+          if (data.status === 'completed') {
+            stopMusic();
+            return;
+          }
+          if (data.beat_position !== undefined) {
+            scoreRenderer.current?.moveToPosition(data.beat_position);
+          }
+        };
+
+        ws.current.onclose = () => {
+          cleanupBrowserMidi();
+          setIsPlaying(false);
+        };
+        ws.current.onerror = () => {
+          cleanupBrowserMidi();
+          setIsPlaying(false);
+        };
+      } catch (e) {
+        console.error('[Browser MIDI] Error:', e);
+        alert(`Browser MIDI error: ${e}`);
+        cleanupBrowserMidi();
+        setIsPlaying(false);
+      }
+      return;
+    }
   };
 
   const stopMusic = () => {
@@ -240,30 +544,14 @@ const ScorePage: React.FC = () => {
       cancelAnimationFrame(animFrameRef.current);
       animFrameRef.current = null;
     }
+    cleanupBrowserAudio();
+    cleanupBrowserMidi();
     scoreRenderer.current?.hide();
     setIsPlaying(false);
     if (ws.current) {
       ws.current.close();
       ws.current = null;
     }
-  };
-
-  const fetchAudioDevices = async () => {
-    try {
-      const res = await fetch(`${backendUrl}/audio-devices`);
-      const data = await res.json();
-      setAudioDevices(data.devices);
-      if (data.devices.length > 0) setSelectedAudioDevice(data.devices[0].name);
-    } catch (e) { console.error('Error fetching audio devices:', e); }
-  };
-
-  const fetchMidiDevices = async () => {
-    try {
-      const res = await fetch(`${backendUrl}/midi-devices`);
-      const data = await res.json();
-      setMidiDevices(data.devices);
-      if (data.devices.length > 0) setSelectedMidiDevice(data.devices[0].name);
-    } catch (e) { console.error('Error fetching midi devices:', e); }
   };
 
   const fetchMethods = async () => {
@@ -379,18 +667,18 @@ const ScorePage: React.FC = () => {
                 <>
                   <div className="flex rounded-full overflow-hidden border border-gray-200">
                     <button
-                      onClick={() => setInputType('Audio')}
+                      onClick={() => setInputType('audio')}
                       className={`px-3 py-1.5 text-xs font-medium transition-colors
-                        ${inputType === 'Audio'
+                        ${inputType === 'audio'
                           ? 'bg-gray-800 text-white'
                           : 'text-gray-500 hover:bg-gray-50'}`}
                     >
                       Audio
                     </button>
                     <button
-                      onClick={() => setInputType('MIDI')}
+                      onClick={() => setInputType('midi')}
                       className={`px-3 py-1.5 text-xs font-medium transition-colors border-l border-gray-200
-                        ${inputType === 'MIDI'
+                        ${inputType === 'midi'
                           ? 'bg-gray-800 text-white'
                           : 'text-gray-500 hover:bg-gray-50'}`}
                     >
@@ -398,28 +686,15 @@ const ScorePage: React.FC = () => {
                     </button>
                   </div>
 
-                  {inputType === 'Audio' && (
+                  {inputType === 'midi' && midiInputs.length > 1 && (
                     <select
-                      value={selectedAudioDevice}
-                      onChange={(e) => setSelectedAudioDevice(e.target.value)}
+                      value={selectedMidiInput}
+                      onChange={(e) => setSelectedMidiInput(e.target.value)}
                       className="appearance-none bg-gray-50 text-gray-700 text-xs rounded-full px-3 py-1.5
                         border border-gray-200 focus:outline-none focus:border-gray-300 cursor-pointer max-w-[180px]"
                     >
-                      {audioDevices.map((device, index) => (
-                        <option key={index} value={device.name}>{device.name}</option>
-                      ))}
-                    </select>
-                  )}
-
-                  {inputType === 'MIDI' && (
-                    <select
-                      value={selectedMidiDevice}
-                      onChange={(e) => setSelectedMidiDevice(e.target.value)}
-                      className="appearance-none bg-gray-50 text-gray-700 text-xs rounded-full px-3 py-1.5
-                        border border-gray-200 focus:outline-none focus:border-gray-300 cursor-pointer max-w-[180px]"
-                    >
-                      {midiDevices.map((device, index) => (
-                        <option key={index} value={device.name}>{device.name}</option>
+                      {midiInputs.map((input) => (
+                        <option key={input.id} value={input.id}>{input.name}</option>
                       ))}
                     </select>
                   )}
@@ -431,13 +706,13 @@ const ScorePage: React.FC = () => {
                       className="appearance-none bg-gray-50 text-gray-700 text-xs rounded-full px-3 py-1.5
                         border border-gray-200 focus:outline-none focus:border-gray-300 cursor-pointer"
                     >
-                      {(availableMethods[inputType === 'Audio' ? 'audio' : 'midi'] || []).map((m) => (
+                      {(availableMethods[inputType] || []).map((m) => (
                         <option key={m} value={m}>{m}</option>
                       ))}
                     </select>
                   )}
 
-                  <div className="flex gap-1">
+                  <div className="flex gap-1 items-center">
                     <button
                       onClick={playMusic}
                       disabled={isPlaying}
@@ -458,6 +733,102 @@ const ScorePage: React.FC = () => {
                     >
                       ■
                     </button>
+
+                    {browserAudioStatus !== 'idle' && (
+                      <div className="flex items-center gap-1.5 ml-2">
+                        {browserAudioStatus === 'connecting' && (
+                          <div className="flex items-center gap-1.5">
+                            <div className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse" />
+                            <span className="text-[10px] text-gray-400">connecting</span>
+                          </div>
+                        )}
+                        {browserAudioStatus === 'listening' && (
+                          <div className="flex items-center gap-1.5">
+                            <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+                            {inputType === 'audio' && (
+                              <div className="flex items-end gap-[2px] h-4">
+                                {Array.from({ length: 8 }).map((_, i) => (
+                                  <div
+                                    key={i}
+                                    className="w-[3px] rounded-full transition-all duration-[50ms]"
+                                    style={{
+                                      height: `${Math.max(3, Math.min(16, audioLevel * 40 * (0.5 + Math.sin(i * 0.8) * 0.5 + Math.random() * 0.3)))}px`,
+                                      backgroundColor: audioLevel > 0.03 ? '#60a5fa' : '#d1d5db',
+                                    }}
+                                  />
+                                ))}
+                              </div>
+                            )}
+                            {inputType === 'midi' && (
+                              <span className="text-[10px] text-blue-400">ready</span>
+                            )}
+                          </div>
+                        )}
+                        {browserAudioStatus === 'initializing' && (
+                          <div className="flex items-center gap-1.5">
+                            <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                            <span className="text-[10px] text-amber-500">preparing...</span>
+                            {inputType === 'audio' && (
+                              <div className="flex items-end gap-[2px] h-4">
+                                {Array.from({ length: 8 }).map((_, i) => (
+                                  <div
+                                    key={i}
+                                    className="w-[3px] rounded-full transition-all duration-[50ms]"
+                                    style={{
+                                      height: `${Math.max(3, Math.min(16, audioLevel * 40 * (0.5 + Math.sin(i * 0.8) * 0.5 + Math.random() * 0.3)))}px`,
+                                      backgroundColor: audioLevel > 0.03 ? '#fbbf24' : '#d1d5db',
+                                    }}
+                                  />
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {browserAudioStatus === 'countdown' && (
+                          <div className="flex items-center gap-2">
+                            <div className="w-6 h-6 rounded-full bg-amber-400 flex items-center justify-center text-white text-xs font-bold animate-pulse">
+                              {countdownNumber}
+                            </div>
+                            {inputType === 'audio' && (
+                              <div className="flex items-end gap-[2px] h-4">
+                                {Array.from({ length: 8 }).map((_, i) => (
+                                  <div
+                                    key={i}
+                                    className="w-[3px] rounded-full transition-all duration-[50ms]"
+                                    style={{
+                                      height: `${Math.max(3, Math.min(16, audioLevel * 40 * (0.5 + Math.sin(i * 0.8) * 0.5 + Math.random() * 0.3)))}px`,
+                                      backgroundColor: audioLevel > 0.03 ? '#fbbf24' : '#d1d5db',
+                                    }}
+                                  />
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {browserAudioStatus === 'active' && (
+                          <div className="flex items-center gap-1.5">
+                            <div className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.5)]" />
+                            {inputType === 'audio' && (
+                              <div className="flex items-end gap-[2px] h-4">
+                                {Array.from({ length: 8 }).map((_, i) => (
+                                  <div
+                                    key={i}
+                                    className="w-[3px] rounded-full transition-all duration-[50ms]"
+                                    style={{
+                                      height: `${Math.max(3, Math.min(16, audioLevel * 40 * (0.5 + Math.sin(i * 0.8) * 0.5 + Math.random() * 0.3)))}px`,
+                                      backgroundColor: audioLevel > 0.03 ? '#34d399' : '#d1d5db',
+                                    }}
+                                  />
+                                ))}
+                              </div>
+                            )}
+                            {inputType === 'midi' && midiMessageCount > 0 && (
+                              <span className="text-[10px] text-emerald-400 tabular-nums">{midiMessageCount}</span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </>
               )}

@@ -3,19 +3,39 @@
 # Start backend and frontend concurrently
 trap 'kill 0' EXIT
 
-# Kill any existing processes on the ports
-lsof -ti:8000 | xargs kill -9 2>/dev/null
-lsof -ti:50003 | xargs kill -9 2>/dev/null
+# Load .env if present
+if [ -f "$(dirname "$0")/.env" ]; then
+    set -a
+    source "$(dirname "$0")/.env"
+    set +a
+fi
 
-echo "Starting backend..."
-conda run -n matchmaker-demo --live-stream bash -c "cd backend && uvicorn app.main:app --reload --port 8000" &
+# Ports and hostname can be overridden via environment variables or .env file.
+HOST_NAME="${HOST_NAME:-localhost}"
+BACKEND_PORT_INTERNAL="${BACKEND_PORT_INTERNAL:-8000}"
+FRONTEND_PORT_INTERNAL="${FRONTEND_PORT_INTERNAL:-3000}"
+BACKEND_PORT_EXTERNAL="${BACKEND_PORT_EXTERNAL:-$BACKEND_PORT_INTERNAL}"
+FRONTEND_PORT_EXTERNAL="${FRONTEND_PORT_EXTERNAL:-$FRONTEND_PORT_INTERNAL}"
 
-echo "Starting frontend..."
-(cd frontend && npm start) &
+CERT_DIR="$(cd "$(dirname "$0")" && pwd)/certs"
+SSL_KEY="$CERT_DIR/key.pem"
+SSL_CERT="$CERT_DIR/cert.pem"
+
+# Kill any existing processes on the internal ports
+for PORT in $BACKEND_PORT_INTERNAL $FRONTEND_PORT_INTERNAL; do
+    PIDS=$(ss -tlnpH 2>/dev/null "sport = :$PORT" | grep -oP 'pid=\K[0-9]+' | sort -u)
+    [ -n "$PIDS" ] && kill -9 $PIDS 2>/dev/null
+done
+
+echo "Starting backend (HTTP)..."
+conda run -n matchmaker-demo --live-stream bash -c "cd backend && uvicorn app.main:app --reload --host 0.0.0.0 --port $BACKEND_PORT_INTERNAL" &
+
+echo "Starting frontend (HTTPS + WS proxy)..."
+conda run -n matchmaker-demo --live-stream bash -c "cd frontend && PORT=$FRONTEND_PORT_INTERNAL HOSTNAME=0.0.0.0 SSL_KEY=$SSL_KEY SSL_CERT=$SSL_CERT BACKEND_INTERNAL_URL=http://localhost:${BACKEND_PORT_INTERNAL} NEXT_PUBLIC_BACKEND_URL=/api node server.js" &
 
 echo ""
-echo "Backend:  http://localhost:8000"
-echo "Frontend: http://localhost:50003"
+echo "Backend:  http://localhost:${BACKEND_PORT_INTERNAL} (internal only)"
+echo "Frontend: https://${HOST_NAME}:${FRONTEND_PORT_EXTERNAL} (public)"
 echo ""
 echo "Press Ctrl+C to stop both."
 

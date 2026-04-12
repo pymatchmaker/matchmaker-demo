@@ -1,4 +1,5 @@
 import asyncio
+import queue
 import shutil
 import threading
 import uuid
@@ -26,6 +27,7 @@ from .utils import (
     preprocess_score,
     run_precomputed_alignment,
     run_score_following,
+    run_websocket_score_following,
 )
 
 
@@ -39,7 +41,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:50003", "http://127.0.0.1:50003"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -155,7 +157,16 @@ def compute_alignment(file_id: str, method: str = "audio_outerhmm"):
     alignment = run_precomputed_alignment(file_id, method=method)
     if alignment is None:
         raise HTTPException(status_code=400, detail="Alignment failed")
-    return {"alignment": alignment}
+    import math
+    def sanitize(obj):
+        if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+            return None
+        if isinstance(obj, dict):
+            return {k: sanitize(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return [sanitize(v) for v in obj]
+        return obj
+    return {"alignment": sanitize(alignment)}
 
 
 @app.get("/score/{file_id}")
@@ -253,6 +264,152 @@ async def websocket_endpoint(websocket: WebSocket):
         print(f"Websocket error: {e}")
     finally:
         stop_event.set()
+        _active_stop_event = None
+        try:
+            if websocket.client_state == WebSocketState.CONNECTED:
+                await websocket.close()
+        except RuntimeError:
+            pass
+        position_manager.reset()
+
+
+@app.websocket("/ws/audio-stream")
+async def websocket_audio_stream_endpoint(websocket: WebSocket):
+    global _active_stop_event
+
+    # Cancel any previous score following session
+    if _active_stop_event is not None:
+        _active_stop_event.set()
+
+    position_manager.reset()
+    await websocket.accept()
+
+    # Receive initial configuration message
+    data = await websocket.receive_json()
+    file_id = data.get("file_id")
+    method = data.get("method", "arzt")
+    input_type = data.get("input_type", "audio")
+    print(f"Stream received config: {data}")
+
+    stop_event = threading.Event()
+    _active_stop_event = stop_event
+    ready_event = threading.Event()
+    data_queue = queue.Queue()
+
+    # Run WebSocket score following in a separate thread
+    loop = asyncio.get_event_loop()
+    task = loop.run_in_executor(
+        executor,
+        run_websocket_score_following,
+        file_id,
+        method,
+        data_queue,
+        input_type,
+        stop_event,
+        ready_event,
+    )
+
+    async def wait_for_ready():
+        """Wait for the matchmaker to finish initialization, then notify the client."""
+        while not ready_event.is_set():
+            await asyncio.sleep(0.1)
+            if task.done():
+                return
+        try:
+            if websocket.client_state == WebSocketState.CONNECTED:
+                await websocket.send_json({"status": "ready"})
+                print(f"Matchmaker ready, notified client for {file_id}")
+        except Exception as e:
+            print(f"Error sending ready status: {e}")
+
+    async def receive_data():
+        """Receive audio/MIDI data from the WebSocket and feed it into the queue."""
+        frame_count = 0
+        try:
+            while websocket.client_state == WebSocketState.CONNECTED:
+                message = await websocket.receive()
+                if message.get("type") == "websocket.disconnect":
+                    break
+                if "bytes" in message and message["bytes"]:
+                    data_queue.put(message["bytes"])
+                    frame_count += 1
+                    if frame_count == 1:
+                        await websocket.send_json({"status": "stream_started"})
+                        print(f"Audio stream started for {file_id}")
+                    if frame_count % 500 == 0:
+                        print(f"Received {frame_count} frames for {file_id}")
+                elif "text" in message and message.get("text"):
+                    import json as json_mod
+                    try:
+                        msg_data = json_mod.loads(message["text"])
+                        if msg_data.get("type") == "midi":
+                            status = msg_data["status"]
+                            msg_type = status & 0xF0
+                            midi_msg = {
+                                "type": "note_on" if msg_type == 0x90 else "note_off",
+                                "note": msg_data["note"],
+                                "velocity": msg_data["velocity"],
+                                "time": msg_data.get("time", 0),
+                            }
+                            data_queue.put(midi_msg)
+                            frame_count += 1
+                            if frame_count == 1:
+                                await websocket.send_json({"status": "stream_started"})
+                                print(f"MIDI stream started for {file_id}")
+                            if frame_count % 100 == 0:
+                                print(f"Received {frame_count} MIDI messages for {file_id}")
+                    except (json_mod.JSONDecodeError, KeyError):
+                        pass
+        except Exception as e:
+            print(f"Receive error: {e}")
+        finally:
+            print(f"Receive ended: {frame_count} total frames for {file_id}")
+            data_queue.put(None)
+
+    async def send_positions():
+        """Poll position_manager and send updates to the client."""
+        prev_position = 0
+        try:
+            while websocket.client_state == WebSocketState.CONNECTED:
+                current_position = position_manager.get_position(file_id)
+                if current_position != prev_position:
+                    print(
+                        f"[{datetime.now().strftime('%H:%M:%S.%f')}] Audio stream position: {current_position}"
+                    )
+                    await websocket.send_json({"beat_position": current_position})
+                    prev_position = current_position
+                await asyncio.sleep(0.05)
+
+                if task.done():
+                    try:
+                        await websocket.send_json({"status": "completed"})
+                    except Exception:
+                        pass
+                    break
+        except Exception as e:
+            print(f"Position send error: {e}")
+
+    try:
+        # Fire-and-forget: notify client when matchmaker is ready
+        asyncio.create_task(wait_for_ready())
+        receive_task = asyncio.create_task(receive_data())
+        send_task = asyncio.create_task(send_positions())
+        # Wait for either task to finish (receive ends on disconnect, send ends on completion)
+        done, pending = await asyncio.wait(
+            [receive_task, send_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for t in pending:
+            t.cancel()
+            try:
+                await t
+            except asyncio.CancelledError:
+                pass
+    except Exception as e:
+        print(f"Audio stream websocket error: {e}")
+    finally:
+        stop_event.set()
+        data_queue.put(None)
         _active_stop_event = None
         try:
             if websocket.client_state == WebSocketState.CONNECTED:

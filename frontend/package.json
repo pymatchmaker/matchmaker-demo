@@ -3,13 +3,14 @@
   "version": "1.0.0",
   "description": "Frontend application",
   "scripts": {
-    "start": "PORT=50003 next dev",
+    "start": "next dev",
     "build": "next build",
     "lint": "next lint",
     "test": "next test"
   },
   "dependencies": {
     "@nextui-org/react": "^2.6.11",
+    "http-proxy": "^1.18.1",
     "next": "^15.5.14",
     "opensheetmusicdisplay": "^1.9.7",
     "react": "^18.3.1",

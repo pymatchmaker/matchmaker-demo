@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 
 interface FileUploadProps {
   backendUrl: string;
@@ -20,8 +20,44 @@ const FileUpload: React.FC<FileUploadProps> = ({ backendUrl, onFileUpload }) => 
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [dots, setDots] = useState('');
   const scoreInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
+  const fakeProgressRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Animate dots and fake progress while uploading
+  useEffect(() => {
+    if (!isUploading) return;
+    const dotTimer = setInterval(() => {
+      setDots((d) => (d.length >= 3 ? '' : d + '.'));
+    }, 500);
+    return () => clearInterval(dotTimer);
+  }, [isUploading]);
+
+  useEffect(() => {
+    if (!isUploading) {
+      if (fakeProgressRef.current) {
+        clearInterval(fakeProgressRef.current);
+        fakeProgressRef.current = null;
+      }
+      return;
+    }
+    // Slowly increment progress while waiting (30 → 85 over time)
+    fakeProgressRef.current = setInterval(() => {
+      setUploadProgress((p) => {
+        if (p >= 85) return p;
+        // Slow down as it gets higher
+        const increment = Math.max(0.3, (85 - p) * 0.02);
+        return Math.min(85, p + increment);
+      });
+    }, 300);
+    return () => {
+      if (fakeProgressRef.current) {
+        clearInterval(fakeProgressRef.current);
+        fakeProgressRef.current = null;
+      }
+    };
+  }, [isUploading]);
 
   const handleUpload = async () => {
     if (!scoreFile) return;
@@ -36,7 +72,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ backendUrl, onFileUpload }) => 
       formData.append('file', scoreFile);
       if (audioFile) formData.append('performance_file', audioFile);
 
-      setUploadProgress(30);
+      setUploadProgress(5);
 
       const response = await fetch(`${backendUrl}/upload`, {
         method: 'POST',
@@ -45,7 +81,6 @@ const FileUpload: React.FC<FileUploadProps> = ({ backendUrl, onFileUpload }) => 
 
       if (!response.ok) throw new Error('Upload failed');
 
-      setUploadProgress(60);
       const data = await response.json();
 
       let fileContent = '';
@@ -179,7 +214,8 @@ const FileUpload: React.FC<FileUploadProps> = ({ backendUrl, onFileUpload }) => 
             />
           </div>
           <p className="text-xs text-gray-400 text-center mt-2">
-            {uploadProgress < 50 ? 'Uploading...' : 'Processing score...'}
+            <span>{uploadProgress < 50 ? 'Uploading' : 'Processing score'}</span>
+            <span className="inline-block w-4 text-left">{dots}</span>
           </p>
         </div>
       ) : (

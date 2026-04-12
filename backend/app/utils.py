@@ -1,5 +1,6 @@
 import json
 import logging
+import queue
 import shutil
 import subprocess
 import threading
@@ -18,6 +19,7 @@ from matchmaker import Matchmaker
 from partitura.score import Part
 
 from .position_manager import position_manager
+from .websocket_audio_stream import WebSocketAudioStream
 
 
 def convert_beat_to_quarter(score_part: Part, current_beat: float) -> float:
@@ -596,29 +598,22 @@ def enrich_musicxml_from_mei(musicxml_path: Path, mei_path: Path) -> None:
     logging.info(f"Enriched MusicXML with MEI metadata: {musicxml_path}")
 
 
-AUDIVERIS_JAVA = "/Applications/Audiveris.app/Contents/runtime/Contents/Home/bin/java"
-AUDIVERIS_APP_DIR = "/Applications/Audiveris.app/Contents/app"
-
-
 def process_pdf_with_audiveris(pdf_path: Path, file_id: str) -> Optional[dict]:
     """Run Audiveris OMR on a PDF, extract PNG + pixel mapping + MXL."""
+    from .audiveris_launcher import AudiverisNotFound, run_audiveris
+
     upload_dir = Path("./uploads")
     output_dir = upload_dir / f"{file_id}_audiveris"
     output_dir.mkdir(exist_ok=True)
 
-    # Build classpath
-    jars = ":".join(str(p) for p in Path(AUDIVERIS_APP_DIR).glob("*.jar"))
-
     try:
-        result = subprocess.run(
-            [AUDIVERIS_JAVA, "-cp", jars, "Audiveris",
-             "-batch", "-transcribe", "-export",
-             "-output", str(output_dir), "--", str(pdf_path)],
-            capture_output=True, text=True, timeout=120,
-        )
+        result = run_audiveris(pdf_path, output_dir, timeout=600.0)
         logging.info(f"Audiveris stdout: {result.stdout[-200:]}")
         if result.returncode != 0:
             logging.error(f"Audiveris stderr: {result.stderr[-500:]}")
+    except AudiverisNotFound as e:
+        logging.error(f"Audiveris not found: {e}")
+        return None
     except subprocess.TimeoutExpired:
         logging.error("Audiveris timed out")
         return None
@@ -924,12 +919,6 @@ def run_precomputed_alignment(file_id: str, method: str = "audio_outerhmm") -> O
     )
 
     import math
-    from matchmaker.utils.stream import STREAM_END
-
-    # Run stream synchronously (not as thread) to avoid join() hang
-    mm.stream.run()
-    if not mm.stream.queue.empty():
-        mm.stream.queue.put(STREAM_END)
 
     # Get timing info for mapping positions to time
     frame_rate = mm.frame_rate or 1
@@ -944,14 +933,17 @@ def run_precomputed_alignment(file_id: str, method: str = "audio_outerhmm") -> O
         else:
             perf_duration = mido.MidiFile(str(performance_file)).length
 
-    # Collect valid positions from score follower
+    # Collect valid positions via Matchmaker.run() which handles
+    # stream lifecycle (start_listening/stop_listening) correctly
     positions: list[float] = []
     try:
-        for pos in mm.score_follower.run(verbose=True):
+        for pos in mm.run(verbose=True):
             val = float(pos)
             if not math.isnan(val):
                 positions.append(val)
     except (TypeError, ValueError):
+        pass
+    except queue.Empty:
         pass
 
     logging.info(f"Alignment completed: {len(positions)} positions")
@@ -1045,11 +1037,9 @@ def run_score_following(file_id: str, input_type: str, device: str, method: str 
         for current_position in mm.run():
             if stop_event and stop_event.is_set():
                 print("Score following stopped by client")
-                # Signal the stream to stop via STREAM_END
                 try:
-                    from matchmaker.utils.stream import STREAM_END
                     if mm.stream and hasattr(mm.stream, 'queue'):
-                        mm.stream.queue.put(STREAM_END)
+                        mm.stream.queue.put(None)
                 except Exception:
                     pass
                 break
@@ -1057,5 +1047,84 @@ def run_score_following(file_id: str, input_type: str, device: str, method: str 
             position_manager.set_position(file_id, quarter_position)
     except Exception as e:
         logging.error(f"Error: {e}")
+        traceback.print_exc()
+        return {"error": str(e)}
+
+
+class WebSocketMatchmaker(Matchmaker):
+    """Matchmaker subclass that uses WebSocket streams instead of local devices."""
+
+    def __init__(self, data_queue: queue.Queue, **kwargs):
+        self._data_queue = data_queue
+        super().__init__(**kwargs)
+
+    def _build_stream(self, method, wait):
+        if self.input_type == "midi":
+            from .websocket_midi_stream import WebSocketMidiStream
+            return WebSocketMidiStream(
+                processor=self.processor,
+                data_queue=self._data_queue,
+            )
+        return WebSocketAudioStream(
+            processor=self.processor,
+            sample_rate=self.sample_rate,
+            hop_length=self.hop_length,
+            data_queue=self._data_queue,
+        )
+
+
+def run_websocket_score_following(
+    file_id: str,
+    method: str,
+    data_queue: queue.Queue,
+    input_type: str = "audio",
+    stop_event: Optional[threading.Event] = None,
+    ready_event: Optional[threading.Event] = None,
+) -> None:
+    score_file = find_score_file_by_id(file_id)
+    if not score_file:
+        logging.error(f"Score file not found for file_id: {file_id}")
+        return
+
+    if score_file.suffix.lower() == ".mei":
+        midi_file = score_file.parent / f"{score_file.stem}.mid"
+        if not midi_file.exists():
+            logging.error(f"MIDI file not found for MEI file: {score_file}")
+            return
+        score_midi = str(midi_file)
+    else:
+        score_midi = str(score_file)
+
+    score_part = partitura.load_score_as_part(score_midi)
+    print(f"Running WebSocket score following ({input_type}) with {score_midi}")
+
+    mm = WebSocketMatchmaker(
+        data_queue=data_queue,
+        score_file=score_midi,
+        input_type=input_type,
+        method=method,
+    )
+
+    if ready_event:
+        ready_event.set()
+        print(f"Matchmaker initialized and ready (method: {method}, input: {input_type})")
+
+    try:
+        print(f"Running WebSocket score following... (method: {method}, input: {input_type})")
+        for current_position in mm.run():
+            if stop_event and stop_event.is_set():
+                print("WebSocket score following stopped by client")
+                try:
+                    if mm.stream and hasattr(mm.stream, 'data_queue'):
+                        mm.stream.data_queue.put(None)
+                except Exception:
+                    pass
+                break
+            quarter_position = convert_beat_to_quarter(score_part, current_position)
+            position_manager.set_position(file_id, quarter_position)
+    except queue.Empty:
+        logging.info("WebSocket stream ended (queue empty)")
+    except Exception as e:
+        logging.error(f"WebSocket score following error: {e}")
         traceback.print_exc()
         return {"error": str(e)}
