@@ -17,7 +17,7 @@ export class OSMDRendererImpl implements ScoreRenderer {
         { type: CursorType.CurrentArea, color: '#3b82f6', alpha: 0.1, follow: false },
       ],
     });
-    this.osmd.zoom = 0.5;
+    this.osmd.zoom = 0.7;
     this.osmd.EngravingRules.TitleTopDistance = 2;
     this.osmd.EngravingRules.SheetTitleHeight = 2.5;
     this.osmd.EngravingRules.SheetSubtitleHeight = 1.5;
@@ -34,6 +34,7 @@ export class OSMDRendererImpl implements ScoreRenderer {
 
   async render(): Promise<void> {
     if (!this.osmd) throw new Error('OSMD not initialized');
+    this.osmd.zoom = 0.7;
     await this.osmd.render();
     this.extractNotes();
     if (this.onNotesRegistered) {

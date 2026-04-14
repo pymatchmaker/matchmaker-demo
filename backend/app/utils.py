@@ -661,8 +661,8 @@ def process_pdf_with_audiveris(pdf_path: Path, file_id: str) -> Optional[dict]:
                         root = ET.parse(f).getroot()
                         pic = root.find("picture")
                         if pic is not None:
-                            pic_width = int(pic.get("width", 0))
-                            pic_height = int(pic.get("height", 0))
+                            pic_width = int(float(pic.get("width", 0)))
+                            pic_height = int(float(pic.get("height", 0)))
                     break
         pixel_mapping["image_width"] = pic_width
         pixel_mapping["image_height"] = pic_height
@@ -670,11 +670,27 @@ def process_pdf_with_audiveris(pdf_path: Path, file_id: str) -> Optional[dict]:
         mapping_path = upload_dir / f"{file_id}_pixel_mapping.json"
         mapping_path.write_text(json.dumps(pixel_mapping))
 
-    # Cleanup temp dir
+    # Generate MIDI directly from .omr (bypasses buggy MXL export)
+    midi_dest = None
+    try:
+        from .omr_parser import omr_to_midi
+        midi_dest = upload_dir / f"{file_id}_score.mid"
+        omr_to_midi(omr_path, midi_dest)
+        logging.info(f"Generated MIDI from .omr directly: {midi_dest}")
+    except Exception as e:
+        logging.error(f"OMR direct MIDI failed: {e}, falling back to MXL")
+        midi_dest = None
+
+    # Cleanup temp dir (but keep .omr for potential re-parsing)
+    # Move .omr to uploads before cleanup
+    omr_keep = upload_dir / f"{file_id}_score.omr"
+    shutil.copy(omr_path, omr_keep)
     shutil.rmtree(output_dir, ignore_errors=True)
 
     return {
         "mxl_path": mxl_dest,
+        "midi_path": midi_dest,
+        "omr_path": omr_keep,
         "png_path": png_dest if png_dest.exists() else None,
         "pixel_mapping": pixel_mapping,
     }
@@ -693,18 +709,18 @@ def _parse_omr_pixel_mapping(xml_bytes: bytes) -> dict:
             for staff in part.findall("staff"):
                 for line in staff.findall(".//line"):
                     for point in line.findall("point"):
-                        staff_ys.append(int(point.get("y")))
+                        staff_ys.append(int(float(point.get("y"))))
 
         sys_top = min(staff_ys) if staff_ys else 0
         sys_bottom = max(staff_ys) if staff_ys else 0
 
         for stack in system.findall("stack"):
-            stack_left = int(stack.get("left"))
-            stack_right = int(stack.get("right"))
+            stack_left = int(float(stack.get("left")))
+            stack_right = int(float(stack.get("right")))
             duration = Fraction(stack.get("duration"))
 
             for slot in stack.findall("slot"):
-                x_offset = int(slot.get("x-offset"))
+                x_offset = int(float(slot.get("x-offset")))
                 time_frac = Fraction(slot.get("time-offset"))
 
                 abs_x = stack_left + x_offset
@@ -724,7 +740,7 @@ def _parse_omr_pixel_mapping(xml_bytes: bytes) -> dict:
     return {"entries": entries}
 
 
-def preprocess_score(score_xml: Path, file_id: str = "") -> Optional[dict | Path]:
+def preprocess_score(score_xml: Path, file_id: str = "", user_tempo: Optional[float] = None) -> Optional[dict | Path]:
     """
     Preprocess the score file to midi and audio.
     Returns dict for PDF, Path for MEI->MusicXML conversion, None for MusicXML.
@@ -734,19 +750,42 @@ def preprocess_score(score_xml: Path, file_id: str = "") -> Optional[dict | Path
         if not file_id:
             file_id = score_xml.stem.split("_")[0]
         result = process_pdf_with_audiveris(score_xml, file_id)
-        if not result or not result.get("mxl_path"):
+        if not result:
             raise ValueError("Audiveris failed to process PDF")
 
-        # Generate MIDI and WAV from the MXL
-        mxl_path = result["mxl_path"]
-        score_obj = partitura.load_score(str(mxl_path))
-        midi_path = f"./uploads/{mxl_path.stem}.mid"
-        partitura.save_score_midi(score_obj, midi_path)
-        wav_path = f"./uploads/{mxl_path.stem}.wav"
-        partitura.save_wav_fluidsynth(score_obj, wav_path)
-        logging.info(f"PDF preprocessed: MIDI={midi_path}, WAV={wav_path}")
+        upload_dir = Path("./uploads")
+        midi_path = result.get("midi_path")
 
-        return {"type": "pdf", **result}
+        if midi_path and Path(midi_path).exists():
+            # Use MIDI generated directly from .omr (more accurate)
+            score_obj = partitura.load_score(str(midi_path))
+            logging.info(f"PDF preprocessed using OMR-direct MIDI: {midi_path}")
+        elif result.get("mxl_path"):
+            # Fallback to MXL
+            mxl_path = result["mxl_path"]
+            score_obj = partitura.load_score(str(mxl_path))
+            midi_path = upload_dir / f"{file_id}_score.mid"
+            partitura.save_score_midi(score_obj, str(midi_path))
+            logging.info(f"PDF preprocessed using MXL fallback: {midi_path}")
+        else:
+            raise ValueError("Audiveris failed to produce usable output")
+
+        # Detect tempo: user input > score marking > default 120
+        if user_tempo is not None:
+            bpm = user_tempo
+        else:
+            from matchmaker.utils.misc import get_tempo_from_score
+            score_part = partitura.load_score_as_part(str(midi_path))
+            mxl_path_for_tempo = result.get("mxl_path")
+            bpm = get_tempo_from_score(score_part, str(mxl_path_for_tempo) if mxl_path_for_tempo else None)
+            if bpm is None:
+                bpm = 120.0
+        logging.info(f"PDF tempo: {bpm} BPM (source: {'user' if user_tempo else 'auto'})")
+
+        wav_path = upload_dir / f"{file_id}_score.wav"
+        partitura.save_wav_fluidsynth(score_obj, str(wav_path), bpm=bpm)
+
+        return {"type": "pdf", "bpm": bpm, **result}
 
     # Special handling for MEI files
     if score_xml.suffix.lower() == ".mei":

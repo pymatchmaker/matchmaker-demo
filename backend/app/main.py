@@ -3,6 +3,7 @@ import queue
 import shutil
 import threading
 import uuid
+from typing import Optional
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
@@ -13,7 +14,7 @@ import partitura
 
 warnings.filterwarnings("ignore", module="partitura")
 
-from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.websockets import WebSocketState
@@ -42,7 +43,6 @@ app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -83,14 +83,16 @@ async def midi_devices():
 @app.get("/methods")
 async def methods():
     return {
-        "audio": ["arzt", "dixon", "audio_outerhmm"],
-        "midi": ["arzt", "dixon", "hmm", "pthmm", "outerhmm"],
+        "audio": ["arzt", "dixon", "outerhmm", "skf"],
+        "midi": ["slt_oltw", "arzt", "dixon", "hmm", "pthmm", "outerhmm"],
     }
 
 
 @app.post("/upload")
 def upload_file(
-    file: UploadFile = File(...), performance_file: UploadFile = File(None)
+    file: UploadFile = File(...),
+    performance_file: UploadFile = File(None),
+    tempo: Optional[str] = Form(None),
 ):
     file_id = str(uuid.uuid4())[:8]
     upload_dir = Path("./uploads")
@@ -120,7 +122,8 @@ def upload_file(
             except Exception as e:
                 print(f"MIDI to WAV conversion failed: {e}")
 
-    preprocess_result = preprocess_score(file_path, file_id=file_id)
+    user_tempo = float(tempo) if tempo else None
+    preprocess_result = preprocess_score(file_path, file_id=file_id, user_tempo=user_tempo)
 
     result: dict = {"file_id": file_id}
 
@@ -145,6 +148,7 @@ async def get_score_image(file_id: str):
 @app.get("/score/{file_id}/pixel-mapping")
 async def get_pixel_mapping(file_id: str):
     import json as json_mod
+
     mapping_path = Path("./uploads") / f"{file_id}_pixel_mapping.json"
     if not mapping_path.exists():
         raise HTTPException(status_code=404, detail="Pixel mapping not found")
@@ -158,6 +162,7 @@ def compute_alignment(file_id: str, method: str = "audio_outerhmm"):
     if alignment is None:
         raise HTTPException(status_code=400, detail="Alignment failed")
     import math
+
     def sanitize(obj):
         if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
             return None
@@ -166,6 +171,7 @@ def compute_alignment(file_id: str, method: str = "audio_outerhmm"):
         if isinstance(obj, (list, tuple)):
             return [sanitize(v) for v in obj]
         return obj
+
     return {"alignment": sanitize(alignment)}
 
 
@@ -247,7 +253,7 @@ async def websocket_endpoint(websocket: WebSocket):
             current_position = position_manager.get_position(file_id)
             if current_position != prev_position:
                 print(
-                    f"[{datetime.now().strftime('%H:%M:%S.%f')}] Current position: {current_position}"
+                    f"[{datetime.now().strftime('%H:%M:%S.%f')}] Current position: {current_position:.2f}"
                 )
                 await websocket.send_json({"beat_position": current_position})
                 prev_position = current_position
@@ -340,6 +346,7 @@ async def websocket_audio_stream_endpoint(websocket: WebSocket):
                         print(f"Received {frame_count} frames for {file_id}")
                 elif "text" in message and message.get("text"):
                     import json as json_mod
+
                     try:
                         msg_data = json_mod.loads(message["text"])
                         if msg_data.get("type") == "midi":
@@ -357,7 +364,9 @@ async def websocket_audio_stream_endpoint(websocket: WebSocket):
                                 await websocket.send_json({"status": "stream_started"})
                                 print(f"MIDI stream started for {file_id}")
                             if frame_count % 100 == 0:
-                                print(f"Received {frame_count} MIDI messages for {file_id}")
+                                print(
+                                    f"Received {frame_count} MIDI messages for {file_id}"
+                                )
                     except (json_mod.JSONDecodeError, KeyError):
                         pass
         except Exception as e:
@@ -374,11 +383,18 @@ async def websocket_audio_stream_endpoint(websocket: WebSocket):
                 current_position = position_manager.get_position(file_id)
                 if current_position != prev_position:
                     print(
-                        f"[{datetime.now().strftime('%H:%M:%S.%f')}] Audio stream position: {current_position}"
+                        f"[{datetime.now().strftime('%H:%M:%S.%f')}] Audio stream position: {current_position:.2f}"
                     )
-                    await websocket.send_json({"beat_position": current_position})
+                    import time as _time
+
+                    await websocket.send_json(
+                        {
+                            "beat_position": current_position,
+                            "server_ts": _time.time() * 1000,
+                        }
+                    )
                     prev_position = current_position
-                await asyncio.sleep(0.05)
+                await asyncio.sleep(0.01)
 
                 if task.done():
                     try:

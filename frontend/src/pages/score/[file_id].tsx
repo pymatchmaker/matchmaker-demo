@@ -107,19 +107,21 @@ const ScorePage: React.FC = () => {
       let isPdf = false;
       let pixelMapping: any = null;
 
-      // 1) Try sessionStorage first (immediate after upload)
+      // 1) Try sessionStorage for metadata (immediate after upload)
       const cached = sessionStorage.getItem(`score_${file_id}`);
       if (cached) {
         const data = JSON.parse(cached);
-        fileContent = data.file_content;
+        fileContent = data.file_content || null;
         fileName = data.file_name;
         hasPerformance = data.has_performance_file;
         perfType = data.performance_input_type || 'audio';
         alignment = data.alignment || null;
         isPdf = data.is_pdf || false;
         pixelMapping = data.pixel_mapping || null;
-      } else {
-        // 2) Fallback: fetch from server (page refresh)
+      }
+
+      // 2) Fetch from server if we don't have file_content (or no cache at all)
+      if (!fileContent && !isPdf) {
         try {
           const res = await fetch(`${backendUrl}/score/${file_id}`);
           if (!res.ok) {
@@ -128,30 +130,23 @@ const ScorePage: React.FC = () => {
           }
           const data = await res.json();
           fileContent = data.file_content;
-          fileName = data.file_name;
-          hasPerformance = data.has_performance_file;
+          fileName = fileName || data.file_name;
+          hasPerformance = hasPerformance || data.has_performance_file;
           isPdf = data.is_pdf || false;
-
-          if (isPdf) {
-            try {
-              const pmRes = await fetch(`${backendUrl}/score/${file_id}/pixel-mapping`);
-              if (pmRes.ok) pixelMapping = await pmRes.json();
-            } catch { /* no pixel mapping */ }
-          }
-
-          // Try to fetch precomputed alignment
-          try {
-            const alignRes = await fetch(`${backendUrl}/score/${file_id}/alignment`);
-            if (alignRes.ok) {
-              const alignData = await alignRes.json();
-              alignment = alignData.alignment;
-            }
-          } catch { /* no alignment available */ }
         } catch (e) {
           setError('Failed to connect to server');
           return;
         }
       }
+
+      // 3) Fetch pixel mapping and alignment if needed
+      if (isPdf && !pixelMapping) {
+        try {
+          const pmRes = await fetch(`${backendUrl}/score/${file_id}/pixel-mapping`);
+          if (pmRes.ok) pixelMapping = await pmRes.json();
+        } catch { /* no pixel mapping */ }
+      }
+      // alignment is only fetched on-demand via POST (Run button)
 
       if (!vfRef.current) {
         setError('Container not available');
@@ -384,22 +379,36 @@ const ScorePage: React.FC = () => {
           }
         };
 
+        let wsMsgCount = 0;
+        let wsLastTime = performance.now();
         ws.current.onmessage = (event) => {
           const data = JSON.parse(event.data);
           if (data.status === 'ready') {
+            console.log('[WS] ready received');
             backendReadyRef.current = true;
             startCountdown();
             return;
           }
           if (data.status === 'stream_started') {
+            console.log('[WS] stream_started');
             return;
           }
           if (data.status === 'completed') {
+            console.log('[WS] completed');
             stopMusic();
             return;
           }
           if (data.beat_position !== undefined) {
+            wsMsgCount++;
+            const now = performance.now();
+            const renderStart = performance.now();
             scoreRenderer.current?.moveToPosition(data.beat_position);
+            const renderEnd = performance.now();
+            if (wsMsgCount % 10 === 1) {
+              const networkDelay = data.server_ts ? (Date.now() - data.server_ts).toFixed(0) : '?';
+              console.log(`[WS] #${wsMsgCount} beat=${data.beat_position.toFixed(2)} msgInterval=${(now - wsLastTime).toFixed(0)}ms network=${networkDelay}ms render=${(renderEnd - renderStart).toFixed(1)}ms`);
+            }
+            wsLastTime = now;
           }
         };
 
@@ -502,22 +511,36 @@ const ScorePage: React.FC = () => {
           }
         };
 
+        let wsMsgCount = 0;
+        let wsLastTime = performance.now();
         ws.current.onmessage = (event) => {
           const data = JSON.parse(event.data);
           if (data.status === 'ready') {
+            console.log('[WS] ready received');
             backendReadyRef.current = true;
             startCountdown();
             return;
           }
           if (data.status === 'stream_started') {
+            console.log('[WS] stream_started');
             return;
           }
           if (data.status === 'completed') {
+            console.log('[WS] completed');
             stopMusic();
             return;
           }
           if (data.beat_position !== undefined) {
+            wsMsgCount++;
+            const now = performance.now();
+            const renderStart = performance.now();
             scoreRenderer.current?.moveToPosition(data.beat_position);
+            const renderEnd = performance.now();
+            if (wsMsgCount % 10 === 1) {
+              const networkDelay = data.server_ts ? (Date.now() - data.server_ts).toFixed(0) : '?';
+              console.log(`[WS] #${wsMsgCount} beat=${data.beat_position.toFixed(2)} msgInterval=${(now - wsLastTime).toFixed(0)}ms network=${networkDelay}ms render=${(renderEnd - renderStart).toFixed(1)}ms`);
+            }
+            wsLastTime = now;
           }
         };
 
@@ -564,11 +587,11 @@ const ScorePage: React.FC = () => {
 
   if (error) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center">
+      <div className="min-h-screen flex flex-col items-center justify-center bg-stone-50 font-sans">
         <p className="text-red-500 text-lg mb-4">{error}</p>
         <button
           onClick={() => router.push('/')}
-          className="px-6 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 text-sm"
+          className="px-6 py-2 bg-stone-800 text-white rounded-lg hover:bg-stone-700 text-sm"
         >
           Back to Upload
         </button>
@@ -577,18 +600,18 @@ const ScorePage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen flex flex-col bg-stone-50 font-sans">
       <Head>
-        <title>Score Following App</title>
+        <title>LISzT</title>
       </Head>
 
-      <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100">
-        <Link href="/" className="text-sm font-medium text-gray-700 hover:text-gray-900 transition-colors cursor-pointer">Score Following <span className="text-gray-400 font-normal">with Matchmaker</span></Link>
+      <div className="flex items-center justify-between px-8 py-5 border-b border-stone-200">
+        <Link href="/" className="font-serif text-xl font-semibold tracking-wide text-stone-700 hover:text-stone-900 transition-colors cursor-pointer active:scale-95">LISzT</Link>
         <a
           href="https://github.com/pymatchmaker/matchmaker"
           target="_blank"
           rel="noopener noreferrer"
-          className="text-gray-400 hover:text-gray-600 transition-colors"
+          className="text-stone-400 hover:text-stone-600 transition-colors"
         >
           <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor">
             <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
