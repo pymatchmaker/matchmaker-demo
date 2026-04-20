@@ -47,6 +47,52 @@ const ScorePage: React.FC = () => {
   const [selectedMidiInput, setSelectedMidiInput] = useState<string>('');
   const [midiMessageCount, setMidiMessageCount] = useState(0);
   const midiStartTimeRef = useRef<number>(0);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showNotePointer, setShowNotePointer] = useState(false);
+  const [showMeasurePointer, setShowMeasurePointer] = useState(true);
+  const settingsRef = useRef<HTMLDivElement>(null);
+
+  // Close settings popup on outside click
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (settingsRef.current && !settingsRef.current.contains(e.target as Node)) {
+        setShowSettings(false);
+      }
+    };
+    if (showSettings) document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [showSettings]);
+
+  // Use refs so the latest values are always available in callbacks
+  const showNotePointerRef = useRef(showNotePointer);
+  const showMeasurePointerRef = useRef(showMeasurePointer);
+  useEffect(() => { showNotePointerRef.current = showNotePointer; }, [showNotePointer]);
+  useEffect(() => { showMeasurePointerRef.current = showMeasurePointer; }, [showMeasurePointer]);
+
+  // Apply cursor visibility after each render or setting change
+  const applyCursorVisibility = useCallback(() => {
+    if (!vfRef.current) return;
+    const container = vfRef.current;
+    const noteOn = showNotePointerRef.current;
+    const measureOn = showMeasurePointerRef.current;
+    const children = container.children;
+    for (let i = 0; i < children.length; i++) {
+      const el = children[i] as HTMLElement;
+      if (!el.style) continue;
+      const bg = el.style.backgroundColor || '';
+      // ImageRenderer: green = note pointer, blue = measure highlight
+      if (bg.includes('51, 204, 51')) el.style.display = noteOn ? 'block' : 'none';
+      if (bg.includes('59, 130, 246')) el.style.display = measureOn ? 'block' : 'none';
+    }
+    // OSMD: cursor elements are <img> with data:image src
+    const imgs = container.querySelectorAll('img[src^="data:image"]');
+    imgs.forEach((img, idx) => {
+      if (idx === 0) (img as HTMLElement).style.display = noteOn ? 'block' : 'none';
+      if (idx === 1) (img as HTMLElement).style.display = measureOn ? 'block' : 'none';
+    });
+  }, []);
+
+  useEffect(() => { applyCursorVisibility(); }, [showNotePointer, showMeasurePointer, applyCursorVisibility]);
 
   const playTick = useCallback(() => {
     try {
@@ -171,6 +217,9 @@ const ScorePage: React.FC = () => {
         await scoreRenderer.current.render();
         scoreRenderer.current.reset();
         scoreRenderer.current.show();
+
+        // Apply initial cursor visibility from settings
+        applyCursorVisibility();
 
         if (hasPerformance) {
           setIsSimulationMode(true);
@@ -309,6 +358,7 @@ const ScorePage: React.FC = () => {
         const t = audioPlayerRef.current?.getCurrentTime() ?? 0;
         const pos = lookupPosition(alignmentData, t);
         scoreRenderer.current?.moveToPosition(pos);
+        applyCursorVisibility();
         animFrameRef.current = requestAnimationFrame(tick);
       };
       animFrameRef.current = requestAnimationFrame(tick);
@@ -403,6 +453,7 @@ const ScorePage: React.FC = () => {
             const now = performance.now();
             const renderStart = performance.now();
             scoreRenderer.current?.moveToPosition(data.beat_position);
+            applyCursorVisibility();
             const renderEnd = performance.now();
             if (wsMsgCount % 10 === 1) {
               const networkDelay = data.server_ts ? (Date.now() - data.server_ts).toFixed(0) : '?';
@@ -535,6 +586,7 @@ const ScorePage: React.FC = () => {
             const now = performance.now();
             const renderStart = performance.now();
             scoreRenderer.current?.moveToPosition(data.beat_position);
+            applyCursorVisibility();
             const renderEnd = performance.now();
             if (wsMsgCount % 10 === 1) {
               const networkDelay = data.server_ts ? (Date.now() - data.server_ts).toFixed(0) : '?';
@@ -602,21 +654,60 @@ const ScorePage: React.FC = () => {
   return (
     <div className="min-h-screen flex flex-col bg-stone-50 font-sans">
       <Head>
-        <title>LISzT</title>
+        {/* <title>LISzT</title> */}
+        <title>Matchmaker for the Web</title>
       </Head>
 
       <div className="flex items-center justify-between px-8 py-5 border-b border-stone-200">
-        <Link href="/" className="font-serif text-xl font-semibold tracking-wide text-stone-700 hover:text-stone-900 transition-colors cursor-pointer active:scale-95">LISzT</Link>
-        <a
-          href="https://github.com/pymatchmaker/matchmaker"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-stone-400 hover:text-stone-600 transition-colors"
-        >
-          <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
-          </svg>
-        </a>
+        {/* <Link href="/" className="...">LISzT</Link> */}
+        <Link href="/" className="font-serif text-xl font-semibold tracking-wide text-stone-700 hover:text-stone-900 transition-colors cursor-pointer active:scale-95">Matchmaker</Link>
+        <div className="flex items-center gap-3">
+          <div className="relative" ref={settingsRef}>
+            <button
+              onClick={() => setShowSettings(!showSettings)}
+              className="text-stone-400 hover:text-stone-600 transition-colors p-1 rounded-lg hover:bg-stone-100"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
+              </svg>
+            </button>
+            {showSettings && (
+              <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-xl border border-stone-100 py-3 px-4 z-50"
+                   style={{ boxShadow: '0 4px 24px rgba(0,0,0,0.06), 0 1px 4px rgba(0,0,0,0.04)' }}>
+                <p className="text-[11px] text-stone-400 uppercase tracking-wider mb-3">Display</p>
+                <label className="flex items-center justify-between cursor-pointer py-1.5">
+                  <span className="text-sm text-stone-600">Note pointer</span>
+                  <button
+                    onClick={() => setShowNotePointer(!showNotePointer)}
+                    className={`relative w-9 h-5 rounded-full transition-colors duration-200 ${showNotePointer ? 'bg-emerald-400' : 'bg-stone-200'}`}
+                  >
+                    <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition-transform duration-200 ${showNotePointer ? 'translate-x-4' : ''}`} />
+                  </button>
+                </label>
+                <label className="flex items-center justify-between cursor-pointer py-1.5">
+                  <span className="text-sm text-stone-600">Measure highlight</span>
+                  <button
+                    onClick={() => setShowMeasurePointer(!showMeasurePointer)}
+                    className={`relative w-9 h-5 rounded-full transition-colors duration-200 ${showMeasurePointer ? 'bg-emerald-400' : 'bg-stone-200'}`}
+                  >
+                    <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition-transform duration-200 ${showMeasurePointer ? 'translate-x-4' : ''}`} />
+                  </button>
+                </label>
+              </div>
+            )}
+          </div>
+          <a
+            href="https://github.com/pymatchmaker/matchmaker"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-stone-400 hover:text-stone-600 transition-colors"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+            </svg>
+          </a>
+        </div>
       </div>
 
       <div className="flex-1 pb-32">

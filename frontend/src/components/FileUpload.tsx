@@ -86,14 +86,9 @@ const FileUpload: React.FC<FileUploadProps> = ({ backendUrl, onFileUpload }) => 
 
       const data = await response.json();
 
-      let fileContent = '';
-      if (!scoreFile.name.toLowerCase().endsWith('.pdf')) {
-        fileContent = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onload = (e) => resolve(e.target?.result as string);
-          reader.readAsText(scoreFile);
-        });
-      }
+      // file_content is now always fetched from server in score page
+      // no need to read locally (avoids encoding issues with accented characters)
+      const fileContent = '';
 
       setUploadProgress(100);
 

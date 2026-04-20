@@ -82,10 +82,9 @@ async def midi_devices():
 
 @app.get("/methods")
 async def methods():
-    return {
-        "audio": ["arzt", "dixon", "outerhmm", "skf"],
-        "midi": ["slt_oltw", "arzt", "dixon", "hmm", "pthmm", "outerhmm"],
-    }
+    """Return available alignment methods per input type, from matchmaker."""
+    from matchmaker.matchmaker import AVAILABLE_METHODS_BY_INPUT_TYPE
+    return AVAILABLE_METHODS_BY_INPUT_TYPE
 
 
 @app.post("/upload")
@@ -195,7 +194,12 @@ async def get_score(file_id: str):
     if not score_file:
         raise HTTPException(status_code=404, detail="Score not found")
 
-    content = score_file.read_text(encoding="utf-8")
+    raw = score_file.read_bytes()
+    # Detect encoding from XML declaration or default to utf-8
+    import re as _re
+    enc_match = _re.search(rb'encoding=["\']([^"\']+)["\']', raw[:200])
+    encoding = enc_match.group(1).decode('ascii') if enc_match else 'utf-8'
+    content = raw.decode(encoding)
     has_performance = find_performance_file_by_id(file_id) is not None
 
     return {
