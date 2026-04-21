@@ -17,9 +17,10 @@ FRONTEND_PORT_INTERNAL="${FRONTEND_PORT_INTERNAL:-3000}"
 BACKEND_PORT_EXTERNAL="${BACKEND_PORT_EXTERNAL:-$BACKEND_PORT_INTERNAL}"
 FRONTEND_PORT_EXTERNAL="${FRONTEND_PORT_EXTERNAL:-$FRONTEND_PORT_INTERNAL}"
 
-CERT_DIR="$(cd "$(dirname "$0")" && pwd)/certs"
-SSL_KEY="$CERT_DIR/key.pem"
-SSL_CERT="$CERT_DIR/cert.pem"
+# HTTPS is enabled by exporting SSL_KEY and SSL_CERT (e.g. in .env);
+# server.js reads them directly. Here we only derive the scheme for the banner.
+SCHEME=http
+[ -n "$SSL_KEY" ] && [ -n "$SSL_CERT" ] && SCHEME=https
 
 # Kill any existing processes on the internal ports
 for PORT in $BACKEND_PORT_INTERNAL $FRONTEND_PORT_INTERNAL; do
@@ -30,12 +31,12 @@ done
 echo "Starting backend (HTTP)..."
 conda run -n matchmaker-demo --live-stream bash -c "cd backend && uvicorn app.main:app --reload --host 0.0.0.0 --port $BACKEND_PORT_INTERNAL" &
 
-echo "Starting frontend (HTTPS + WS proxy)..."
-conda run -n matchmaker-demo --live-stream bash -c "cd frontend && PORT=$FRONTEND_PORT_INTERNAL HOSTNAME=0.0.0.0 SSL_KEY=$SSL_KEY SSL_CERT=$SSL_CERT BACKEND_INTERNAL_URL=http://localhost:${BACKEND_PORT_INTERNAL} NEXT_PUBLIC_BACKEND_URL=/api node server.js" &
+echo "Starting frontend (${SCHEME} + WS proxy)..."
+conda run -n matchmaker-demo --live-stream bash -c "cd frontend && PORT=$FRONTEND_PORT_INTERNAL HOSTNAME=0.0.0.0 BACKEND_INTERNAL_URL=http://localhost:${BACKEND_PORT_INTERNAL} NEXT_PUBLIC_BACKEND_URL=/api node server.js" &
 
 echo ""
 echo "Backend:  http://localhost:${BACKEND_PORT_INTERNAL} (internal only)"
-echo "Frontend: https://${HOST_NAME}:${FRONTEND_PORT_EXTERNAL} (public)"
+echo "Frontend: ${SCHEME}://${HOST_NAME}:${FRONTEND_PORT_EXTERNAL} (public)"
 echo ""
 echo "Press Ctrl+C to stop both."
 

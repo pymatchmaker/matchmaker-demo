@@ -163,6 +163,7 @@ cython_debug/
 #.idea/
 
 .env*
+!.env.example
 uploads/
 
 # nextjs

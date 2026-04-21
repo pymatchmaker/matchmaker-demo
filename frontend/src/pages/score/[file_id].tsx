@@ -698,7 +698,7 @@ const ScorePage: React.FC = () => {
             )}
           </div>
           <a
-            href="https://github.com/pymatchmaker/matchmaker"
+            href="https://github.com/pymatchmaker/matchmaker-demo"
             target="_blank"
             rel="noopener noreferrer"
             className="text-stone-400 hover:text-stone-600 transition-colors"

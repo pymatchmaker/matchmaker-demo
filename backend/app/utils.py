@@ -13,7 +13,6 @@ from typing import Optional
 
 import mido
 import partitura
-import pyaudio
 from lxml import etree as lxml_etree
 from matchmaker import Matchmaker
 from partitura.score import Part
@@ -876,6 +875,7 @@ def get_audio_devices() -> list[dict]:
 
     """
     try:
+        import pyaudio  # optional: only needed to enumerate local audio devices
         p = pyaudio.PyAudio()
         device_count = p.get_device_count()
         default_device = p.get_default_input_device_info()

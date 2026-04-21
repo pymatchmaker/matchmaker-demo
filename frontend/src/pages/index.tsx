@@ -43,7 +43,7 @@ const IndexPage: React.FC = () => {
       <nav className="flex items-center justify-between px-8 py-5 relative z-10">
         <span onClick={() => router.push('/').then(() => router.reload())} className="font-serif text-xl font-semibold tracking-wide text-stone-700 hover:text-stone-900 transition-colors cursor-pointer active:scale-95">Matchmaker</span>
         <a
-          href="https://github.com/pymatchmaker/matchmaker"
+          href="https://github.com/pymatchmaker/matchmaker-demo"
           target="_blank"
           rel="noopener noreferrer"
           className="text-stone-400 hover:text-stone-700 transition-colors"
