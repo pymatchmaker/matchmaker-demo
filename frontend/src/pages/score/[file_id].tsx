@@ -410,7 +410,8 @@ const ScorePage: React.FC = () => {
         setBrowserAudioStatus('listening');
 
         // Connect WebSocket
-        const wsUrl = `wss://${window.location.host}/ws/audio-stream`;
+        const wsScheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        const wsUrl = `${wsScheme}://${window.location.host}/ws/audio-stream`;
         ws.current = new WebSocket(wsUrl);
 
         ws.current.onopen = () => {
@@ -523,7 +524,8 @@ const ScorePage: React.FC = () => {
         setBrowserAudioStatus('listening');
 
         // Connect WebSocket
-        const wsUrl = `wss://${window.location.host}/ws/audio-stream`;
+        const wsScheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        const wsUrl = `${wsScheme}://${window.location.host}/ws/audio-stream`;
         ws.current = new WebSocket(wsUrl);
 
         ws.current.onopen = () => {
@@ -655,7 +657,7 @@ const ScorePage: React.FC = () => {
     <div className="min-h-screen flex flex-col bg-stone-50 font-sans">
       <Head>
         {/* <title>LISzT</title> */}
-        <title>Matchmaker for the Web</title>
+        <title>Online Score Follower</title>
       </Head>
 
       <div className="flex items-center justify-between px-8 py-5 border-b border-stone-200">

@@ -14,7 +14,25 @@ A web application for real-time score following powered by [Matchmaker](https://
 - **Visual feedback**: measure highlighting + note cursor (toggleable in settings)
 - **Tempo control**: auto-detected from score markings or manually set on upload
 
-## Pre-requisites
+## Quick start (Docker)
+
+The easiest way to run the app — no Python/Node setup required.
+
+**Pre-requisites:** [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+
+```bash
+git clone https://github.com/laurenceyoon/matchmaker-demo.git
+cd matchmaker-demo
+docker compose up
+```
+
+Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+> The first run will pull the images from Docker Hub (~1–2 GB). Subsequent starts are instant.
+
+---
+
+## Pre-requisites (manual setup)
 
 - Python 3.12 (conda recommended)
 - Node.js 20+

@@ -1,0 +1,12 @@
+services:
+  matchmaker-demo:
+    build: .
+    image: laurenceyoon/matchmaker-demo:latest
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - uploads:/app/backend/uploads
+
+volumes:
+  uploads:

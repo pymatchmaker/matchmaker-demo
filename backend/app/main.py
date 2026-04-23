@@ -83,8 +83,9 @@ async def midi_devices():
 @app.get("/methods")
 async def methods():
     """Return available alignment methods per input type, from matchmaker."""
-    from matchmaker.matchmaker import AVAILABLE_METHODS_BY_INPUT_TYPE
-    return AVAILABLE_METHODS_BY_INPUT_TYPE
+    from matchmaker.matchmaker import AVAILABLE_METHODS
+
+    return AVAILABLE_METHODS
 
 
 @app.post("/upload")
@@ -122,7 +123,9 @@ def upload_file(
                 print(f"MIDI to WAV conversion failed: {e}")
 
     user_tempo = float(tempo) if tempo else None
-    preprocess_result = preprocess_score(file_path, file_id=file_id, user_tempo=user_tempo)
+    preprocess_result = preprocess_score(
+        file_path, file_id=file_id, user_tempo=user_tempo
+    )
 
     result: dict = {"file_id": file_id}
 
@@ -197,8 +200,9 @@ async def get_score(file_id: str):
     raw = score_file.read_bytes()
     # Detect encoding from XML declaration or default to utf-8
     import re as _re
+
     enc_match = _re.search(rb'encoding=["\']([^"\']+)["\']', raw[:200])
-    encoding = enc_match.group(1).decode('ascii') if enc_match else 'utf-8'
+    encoding = enc_match.group(1).decode("ascii") if enc_match else "utf-8"
     content = raw.decode(encoding)
     has_performance = find_performance_file_by_id(file_id) is not None
 

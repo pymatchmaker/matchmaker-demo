@@ -36,12 +36,11 @@ const IndexPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-stone-50 flex flex-col font-sans">
       <Head>
-        <title>Matchmaker for the Web</title>
+        <title>Online Score Follower</title>
       </Head>
 
       {/* Nav */}
-      <nav className="flex items-center justify-between px-8 py-5 relative z-10">
-        <span onClick={() => router.push('/').then(() => router.reload())} className="font-serif text-xl font-semibold tracking-wide text-stone-700 hover:text-stone-900 transition-colors cursor-pointer active:scale-95">Matchmaker</span>
+      <nav className="flex items-center justify-end px-8 py-5 relative z-10">
         <a
           href="https://github.com/pymatchmaker/matchmaker-demo"
           target="_blank"
@@ -57,12 +56,14 @@ const IndexPage: React.FC = () => {
       {/* Hero */}
       <div className="flex-1 flex flex-col items-center justify-center px-6 -mt-16">
         <div className="text-center mb-12">
-          {/* <h1>LISzT | Live Score Tracker in your browser</h1> */}
-          <h1 className="font-serif text-5xl font-semibold tracking-tight text-stone-800">
-            Matchmaker for the Web
+          <p className="font-sans text-xs tracking-[0.25em] uppercase text-stone-400 mb-4">
+            Web-based Score Follower
+          </p>
+          <h1 className="font-serif text-6xl font-semibold tracking-tight text-stone-800">
+            Matchmaker
           </h1>
-          <p className="font-serif text-xl text-stone-400 mt-3 italic">
-            Live Score Following, powered by <a href="https://github.com/pymatchmaker/matchmaker" target="_blank" rel="noopener noreferrer" className="text-stone-500 hover:text-stone-700 underline underline-offset-4 decoration-stone-300">Matchmaker</a>
+          <p className="font-sans text-sm text-stone-400 mt-4 max-w-sm mx-auto leading-relaxed">
+            Try <a href="https://github.com/pymatchmaker/matchmaker" target="_blank" rel="noopener noreferrer" className="text-stone-500 hover:text-stone-700 underline underline-offset-2 decoration-stone-300">matchmaker</a> in your browser.<br />Upload a score and play along with mic or MIDI input.
           </p>
         </div>
 
@@ -73,7 +74,7 @@ const IndexPage: React.FC = () => {
 
       {/* Footer */}
       <div className="text-center py-6 text-xs text-stone-400 tracking-wide">
-        Accepts MusicXML, MEI, and PDF score formats
+        Supports MusicXML, MEI, and PDF score formats
       </div>
     </div>
   );

@@ -1,7 +1,13 @@
 #!/bin/bash
 
-# Start backend and frontend concurrently
-trap 'kill 0' EXIT
+cleanup() {
+    trap - INT TERM EXIT
+    local pids
+    pids=$(jobs -p)
+    [ -n "$pids" ] && kill $pids 2>/dev/null
+    wait 2>/dev/null
+}
+trap cleanup INT TERM EXIT
 
 # Load .env if present
 if [ -f "$(dirname "$0")/.env" ]; then
@@ -28,7 +34,7 @@ for PORT in $BACKEND_PORT_INTERNAL $FRONTEND_PORT_INTERNAL; do
     [ -n "$PIDS" ] && kill -9 $PIDS 2>/dev/null
 done
 
-echo "Starting backend (HTTP)..."
+echo "Starting backend..."
 conda run -n matchmaker-demo --live-stream bash -c "cd backend && uvicorn app.main:app --reload --host 0.0.0.0 --port $BACKEND_PORT_INTERNAL" &
 
 echo "Starting frontend (${SCHEME} + WS proxy)..."
