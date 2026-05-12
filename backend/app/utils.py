@@ -17,8 +17,10 @@ from lxml import etree as lxml_etree
 from matchmaker import Matchmaker
 from partitura.score import Part
 
+from matchmaker.io.audio import BytesAudioStream
+from matchmaker.io.midi import BytesMidiStream
+
 from .position_manager import position_manager
-from .websocket_audio_stream import WebSocketAudioStream
 
 
 def convert_beat_to_quarter(score_part: Part, current_beat: float) -> float:
@@ -1099,12 +1101,11 @@ class WebSocketMatchmaker(Matchmaker):
 
     def _build_stream(self, method, wait):
         if self.input_type == "midi":
-            from .websocket_midi_stream import WebSocketMidiStream
-            return WebSocketMidiStream(
+            return BytesMidiStream(
                 processor=self.processor,
                 data_queue=self._data_queue,
             )
-        return WebSocketAudioStream(
+        return BytesAudioStream(
             processor=self.processor,
             sample_rate=self.sample_rate,
             hop_length=self.hop_length,

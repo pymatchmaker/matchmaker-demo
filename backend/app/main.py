@@ -337,7 +337,13 @@ async def websocket_audio_stream_endpoint(websocket: WebSocket):
             print(f"Error sending ready status: {e}")
 
     async def receive_data():
-        """Receive audio/MIDI data from the WebSocket and feed it into the queue."""
+        """Receive audio/MIDI bytes from the WebSocket and feed them into the queue.
+
+        Both audio (raw float32 PCM frames) and MIDI (raw bytes from Web MIDI
+        API's ``MIDIMessageEvent.data``) are forwarded as binary frames. The
+        matchmaker-side stream (``BytesAudioStream`` / ``BytesMidiStream``)
+        handles all parsing.
+        """
         frame_count = 0
         try:
             while websocket.client_state == WebSocketState.CONNECTED:
@@ -349,34 +355,12 @@ async def websocket_audio_stream_endpoint(websocket: WebSocket):
                     frame_count += 1
                     if frame_count == 1:
                         await websocket.send_json({"status": "stream_started"})
-                        print(f"Audio stream started for {file_id}")
-                    if frame_count % 500 == 0:
-                        print(f"Received {frame_count} frames for {file_id}")
-                elif "text" in message and message.get("text"):
-                    import json as json_mod
-
-                    try:
-                        msg_data = json_mod.loads(message["text"])
-                        if msg_data.get("type") == "midi":
-                            status = msg_data["status"]
-                            msg_type = status & 0xF0
-                            midi_msg = {
-                                "type": "note_on" if msg_type == 0x90 else "note_off",
-                                "note": msg_data["note"],
-                                "velocity": msg_data["velocity"],
-                                "time": msg_data.get("time", 0),
-                            }
-                            data_queue.put(midi_msg)
-                            frame_count += 1
-                            if frame_count == 1:
-                                await websocket.send_json({"status": "stream_started"})
-                                print(f"MIDI stream started for {file_id}")
-                            if frame_count % 100 == 0:
-                                print(
-                                    f"Received {frame_count} MIDI messages for {file_id}"
-                                )
-                    except (json_mod.JSONDecodeError, KeyError):
-                        pass
+                        print(f"{input_type.upper()} stream started for {file_id}")
+                    log_interval = 500 if input_type == "audio" else 100
+                    if frame_count % log_interval == 0:
+                        print(
+                            f"Received {frame_count} {input_type} frames for {file_id}"
+                        )
         except Exception as e:
             print(f"Receive error: {e}")
         finally:

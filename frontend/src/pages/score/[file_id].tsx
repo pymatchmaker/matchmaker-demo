@@ -46,7 +46,6 @@ const ScorePage: React.FC = () => {
   const [midiInputs, setMidiInputs] = useState<Array<{ id: string; name: string }>>([]);
   const [selectedMidiInput, setSelectedMidiInput] = useState<string>('');
   const [midiMessageCount, setMidiMessageCount] = useState(0);
-  const midiStartTimeRef = useRef<number>(0);
   const [showSettings, setShowSettings] = useState(false);
   const [showNotePointer, setShowNotePointer] = useState(false);
   const [showMeasurePointer, setShowMeasurePointer] = useState(true);
@@ -534,32 +533,24 @@ const ScorePage: React.FC = () => {
             method: selectedMethod || undefined,
             input_type: 'midi',
           }));
-          midiStartTimeRef.current = performance.now();
           setBrowserAudioStatus('initializing');
         };
 
-        // Listen for MIDI messages
+        // Listen for MIDI messages and forward the raw Web MIDI bytes as
+        // a binary WebSocket frame. The backend's BytesMidiStream parses
+        // the bytes via mido.Parser, so no protocol-level conversion (JSON,
+        // dict, base64) is required.
         midiInput.onmidimessage = (event: MIDIMessageEvent) => {
           if (!sendingRef.current) return;
           if (!event.data || event.data.length < 3) return;
           const statusByte = event.data[0];
-          const data1 = event.data[1];
-          const data2 = event.data[2];
 
           // Only forward note_on (0x90) and note_off (0x80) messages
           const msgType = statusByte & 0xF0;
           if (msgType !== 0x90 && msgType !== 0x80) return;
 
-          const relativeTime = (performance.now() - midiStartTimeRef.current) / 1000;
-
           if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-            ws.current.send(JSON.stringify({
-              type: 'midi',
-              status: statusByte,
-              note: data1,
-              velocity: data2,
-              time: relativeTime,
-            }));
+            ws.current.send(event.data);
             setMidiMessageCount((c) => c + 1);
           }
         };
