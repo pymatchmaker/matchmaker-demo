@@ -287,8 +287,8 @@ async def websocket_endpoint(websocket: WebSocket):
         position_manager.reset()
 
 
-@app.websocket("/ws/audio-stream")
-async def websocket_audio_stream_endpoint(websocket: WebSocket):
+@app.websocket("/ws/live-input")
+async def websocket_live_input_endpoint(websocket: WebSocket):
     global _active_stop_event
 
     # Cancel any previous score following session
@@ -348,19 +348,31 @@ async def websocket_audio_stream_endpoint(websocket: WebSocket):
         try:
             while websocket.client_state == WebSocketState.CONNECTED:
                 message = await websocket.receive()
-                if message.get("type") == "websocket.disconnect":
+                if message["type"] == "websocket.disconnect":
                     break
-                if "bytes" in message and message["bytes"]:
-                    data_queue.put(message["bytes"])
-                    frame_count += 1
-                    if frame_count == 1:
-                        await websocket.send_json({"status": "stream_started"})
-                        print(f"{input_type.upper()} stream started for {file_id}")
-                    log_interval = 500 if input_type == "audio" else 100
-                    if frame_count % log_interval == 0:
-                        print(
-                            f"Received {frame_count} {input_type} frames for {file_id}"
-                        )
+                if message["type"] != "websocket.receive":
+                    continue
+                raw = message.get("bytes")
+                if raw is None:
+                    continue
+                payload = bytes(raw)
+                if len(payload) == 0:
+                    continue
+                data_queue.put(payload)
+                frame_count += 1
+                if frame_count == 1:
+                    await websocket.send_json({"status": "stream_started"})
+                    print(f"{input_type.upper()} stream started for {file_id}")
+                if input_type == "midi" and frame_count == 1:
+                    print(
+                        f"[live-input] MIDI chunk #{frame_count} "
+                        f"len={len(payload)} hex={payload.hex()}"
+                    )
+                log_interval = 500 if input_type == "audio" else 100
+                if frame_count % log_interval == 0:
+                    print(
+                        f"Received {frame_count} {input_type} frames for {file_id}"
+                    )
         except Exception as e:
             print(f"Receive error: {e}")
         finally:
@@ -375,7 +387,7 @@ async def websocket_audio_stream_endpoint(websocket: WebSocket):
                 current_position = position_manager.get_position(file_id)
                 if current_position != prev_position:
                     print(
-                        f"[{datetime.now().strftime('%H:%M:%S.%f')}] Audio stream position: {current_position:.2f}"
+                        f"[{datetime.now().strftime('%H:%M:%S.%f')}] Live input position: {current_position:.2f}"
                     )
                     import time as _time
 
@@ -414,7 +426,7 @@ async def websocket_audio_stream_endpoint(websocket: WebSocket):
             except asyncio.CancelledError:
                 pass
     except Exception as e:
-        print(f"Audio stream websocket error: {e}")
+        print(f"Live input websocket error: {e}")
     finally:
         stop_event.set()
         data_queue.put(None)

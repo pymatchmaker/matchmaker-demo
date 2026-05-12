@@ -30,7 +30,13 @@ SCHEME=http
 
 # Kill any existing processes on the internal ports
 for PORT in $BACKEND_PORT_INTERNAL $FRONTEND_PORT_INTERNAL; do
-    PIDS=$(ss -tlnpH 2>/dev/null "sport = :$PORT" | grep -oP 'pid=\K[0-9]+' | sort -u)
+    if command -v lsof >/dev/null 2>&1; then
+        PIDS=$(lsof -ti tcp:"$PORT" 2>/dev/null | sort -u)
+    elif command -v ss >/dev/null 2>&1; then
+        PIDS=$(ss -tlnpH 2>/dev/null "sport = :$PORT" | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | sort -u)
+    else
+        PIDS=""
+    fi
     [ -n "$PIDS" ] && kill -9 $PIDS 2>/dev/null
 done
 

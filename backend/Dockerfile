@@ -19,7 +19,7 @@ WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir "git+https://github.com/pymatchmaker/matchmaker.git@533dea2"
+    && pip install --no-cache-dir "git+https://github.com/pymatchmaker/matchmaker.git@8c3b981"
 
 RUN mkdir -p uploads
 

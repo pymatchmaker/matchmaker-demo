@@ -45,7 +45,9 @@ const ScorePage: React.FC = () => {
   const midiInputRef = useRef<MIDIInput | null>(null);
   const [midiInputs, setMidiInputs] = useState<Array<{ id: string; name: string }>>([]);
   const [selectedMidiInput, setSelectedMidiInput] = useState<string>('');
+  const selectedMidiInputRef = useRef('');
   const [midiMessageCount, setMidiMessageCount] = useState(0);
+  const [midiInputError, setMidiInputError] = useState<string>('');
   const [showSettings, setShowSettings] = useState(false);
   const [showNotePointer, setShowNotePointer] = useState(false);
   const [showMeasurePointer, setShowMeasurePointer] = useState(true);
@@ -67,6 +69,103 @@ const ScorePage: React.FC = () => {
   const showMeasurePointerRef = useRef(showMeasurePointer);
   useEffect(() => { showNotePointerRef.current = showNotePointer; }, [showNotePointer]);
   useEffect(() => { showMeasurePointerRef.current = showMeasurePointer; }, [showMeasurePointer]);
+  useEffect(() => { selectedMidiInputRef.current = selectedMidiInput; }, [selectedMidiInput]);
+
+  const syncMidiInputs = useCallback((midiAccess: MIDIAccess) => {
+    const inputs: Array<{ id: string; name: string }> = [];
+    midiAccess.inputs.forEach((input) => {
+      inputs.push({ id: input.id, name: input.name || `MIDI Input ${input.id}` });
+    });
+
+    console.log('[Browser MIDI] inputs:', inputs);
+
+    setMidiInputs(inputs);
+    setSelectedMidiInput((current) => {
+      if (inputs.length === 0) return '';
+      if (current && inputs.some((input) => input.id === current)) return current;
+      return inputs[0].id;
+    });
+    return inputs;
+  }, []);
+
+  const requestBrowserMidiAccess = useCallback(async (showAlert = false) => {
+    console.log('[Browser MIDI] requestMIDIAccess start');
+    if (!('requestMIDIAccess' in navigator)) {
+      const message = 'Web MIDI is not supported in this browser. Use Chrome or Edge on HTTPS/localhost.';
+      console.warn('[Browser MIDI]', message);
+      setMidiInputError(message);
+      if (showAlert) alert(message);
+      return null;
+    }
+
+    try {
+      setMidiInputError('');
+      const midiAccess = await navigator.requestMIDIAccess();
+      console.log('[Browser MIDI] requestMIDIAccess granted');
+      midiAccessRef.current = midiAccess;
+      const inputs = syncMidiInputs(midiAccess);
+      midiAccess.onstatechange = (event) => {
+        console.log('[Browser MIDI] statechange:', event.port?.type, event.port?.name, event.port?.state, event.port?.connection);
+        syncMidiInputs(midiAccess);
+      };
+
+      if (inputs.length === 0) {
+        const message = 'No MIDI input devices found. Please connect a MIDI device and try again.';
+        console.warn('[Browser MIDI]', message);
+        setMidiInputError(message);
+        if (showAlert) alert(message);
+      }
+
+      return midiAccess;
+    } catch (e) {
+      const message = `Browser MIDI error: ${e}`;
+      console.error('[Browser MIDI] requestMIDIAccess failed:', e);
+      setMidiInputError(message);
+      if (showAlert) alert(message);
+      return null;
+    }
+  }, [syncMidiInputs]);
+
+  const handleBrowserMidiMessage = useCallback((event: MIDIMessageEvent) => {
+    if (!event.data || event.data.length < 1) return;
+
+    const src = new Uint8Array(
+      event.data.buffer,
+      event.data.byteOffset,
+      event.data.byteLength,
+    );
+    const copy = new Uint8Array(src.length);
+    copy.set(src);
+    const input = event.currentTarget as MIDIInput | null;
+    const inputId = input?.id || '';
+    const isSelectedInput = !selectedMidiInputRef.current || inputId === selectedMidiInputRef.current;
+
+    if (isSelectedInput && sendingRef.current && ws.current && ws.current.readyState === WebSocket.OPEN) {
+      ws.current.send(copy);
+      setMidiMessageCount((count) => count + 1);
+    }
+  }, []);
+
+  const attachMidiInputListener = useCallback((midiAccess: MIDIAccess, inputId: string) => {
+    let foundInput: MIDIInput | undefined;
+    midiAccess.inputs.forEach((input) => {
+      input.onmidimessage = handleBrowserMidiMessage;
+      console.log(`[Browser MIDI] listening on ${input.name || input.id}`);
+      if (input.id === inputId) foundInput = input;
+    });
+
+    if (!foundInput) return null;
+    midiInputRef.current = foundInput;
+    console.log(`[Browser MIDI] selected input ${foundInput.name || foundInput.id}`);
+    return foundInput;
+  }, [handleBrowserMidiMessage]);
+
+  useEffect(() => {
+    if (inputType !== 'midi') return;
+    const midiAccess = midiAccessRef.current;
+    if (!midiAccess || !selectedMidiInput) return;
+    attachMidiInputListener(midiAccess, selectedMidiInput);
+  }, [inputType, selectedMidiInput, attachMidiInputListener]);
 
   // Apply cursor visibility after each render or setting change
   const applyCursorVisibility = useCallback(() => {
@@ -111,6 +210,7 @@ const ScorePage: React.FC = () => {
   }, []);
 
   const startCountdown = useCallback(() => {
+    console.log('[WS] countdown start');
     setBrowserAudioStatus('countdown');
     let remaining = 4;
     setCountdownNumber(remaining);
@@ -320,6 +420,10 @@ const ScorePage: React.FC = () => {
       midiInputRef.current = null;
     }
     if (midiAccessRef.current) {
+      midiAccessRef.current.inputs.forEach((input) => {
+        input.onmidimessage = null;
+      });
+      midiAccessRef.current.onstatechange = null;
       midiAccessRef.current = null;
     }
     backendReadyRef.current = false;
@@ -410,7 +514,7 @@ const ScorePage: React.FC = () => {
 
         // Connect WebSocket
         const wsScheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
-        const wsUrl = `${wsScheme}://${window.location.host}/ws/audio-stream`;
+        const wsUrl = `${wsScheme}://${window.location.host}/ws/live-input`;
         ws.current = new WebSocket(wsUrl);
 
         ws.current.onopen = () => {
@@ -486,17 +590,17 @@ const ScorePage: React.FC = () => {
         setBrowserAudioStatus('connecting');
         setMidiMessageCount(0);
 
-        const midiAccess = await navigator.requestMIDIAccess();
-        midiAccessRef.current = midiAccess;
-
-        // Gather available MIDI inputs
-        const inputs: Array<{ id: string; name: string }> = [];
-        midiAccess.inputs.forEach((input) => {
-          inputs.push({ id: input.id, name: input.name || `MIDI Input ${input.id}` });
-        });
-        setMidiInputs(inputs);
+        const midiAccess = midiAccessRef.current || await requestBrowserMidiAccess(true);
+        if (!midiAccess) {
+          console.warn('[Browser MIDI] play aborted: no MIDI access');
+          cleanupBrowserMidi();
+          setIsPlaying(false);
+          return;
+        }
+        const inputs = syncMidiInputs(midiAccess);
 
         if (inputs.length === 0) {
+          console.warn('[Browser MIDI] play aborted: no MIDI inputs');
           alert('No MIDI input devices found. Please connect a MIDI device and try again.');
           cleanupBrowserMidi();
           setIsPlaying(false);
@@ -506,53 +610,33 @@ const ScorePage: React.FC = () => {
         // Auto-select first input if none selected
         const targetId = selectedMidiInput || inputs[0].id;
         if (!selectedMidiInput) setSelectedMidiInput(targetId);
+        console.log('[Browser MIDI] play target input:', targetId);
 
-        let foundInput: MIDIInput | undefined;
-        midiAccess.inputs.forEach((input) => {
-          if (input.id === targetId) foundInput = input;
-        });
+        const foundInput = attachMidiInputListener(midiAccess, targetId);
         if (!foundInput) {
+          console.warn('[Browser MIDI] play aborted: selected input not found', targetId);
           alert('Selected MIDI input not found.');
           cleanupBrowserMidi();
           setIsPlaying(false);
           return;
         }
-        const midiInput = foundInput;
-        midiInputRef.current = midiInput;
 
         setBrowserAudioStatus('listening');
 
         // Connect WebSocket
         const wsScheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
-        const wsUrl = `${wsScheme}://${window.location.host}/ws/audio-stream`;
+        const wsUrl = `${wsScheme}://${window.location.host}/ws/live-input`;
         ws.current = new WebSocket(wsUrl);
+        console.log('[Browser MIDI] websocket connecting:', wsUrl);
 
         ws.current.onopen = () => {
+          console.log('[Browser MIDI] websocket open');
           ws.current?.send(JSON.stringify({
             file_id,
             method: selectedMethod || undefined,
             input_type: 'midi',
           }));
           setBrowserAudioStatus('initializing');
-        };
-
-        // Listen for MIDI messages and forward the raw Web MIDI bytes as
-        // a binary WebSocket frame. The backend's BytesMidiStream parses
-        // the bytes via mido.Parser, so no protocol-level conversion (JSON,
-        // dict, base64) is required.
-        midiInput.onmidimessage = (event: MIDIMessageEvent) => {
-          if (!sendingRef.current) return;
-          if (!event.data || event.data.length < 3) return;
-          const statusByte = event.data[0];
-
-          // Only forward note_on (0x90) and note_off (0x80) messages
-          const msgType = statusByte & 0xF0;
-          if (msgType !== 0x90 && msgType !== 0x80) return;
-
-          if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-            ws.current.send(event.data);
-            setMidiMessageCount((c) => c + 1);
-          }
         };
 
         let wsMsgCount = 0;
@@ -590,10 +674,12 @@ const ScorePage: React.FC = () => {
         };
 
         ws.current.onclose = () => {
+          console.log('[Browser MIDI] websocket close');
           cleanupBrowserMidi();
           setIsPlaying(false);
         };
-        ws.current.onerror = () => {
+        ws.current.onerror = (event) => {
+          console.error('[Browser MIDI] websocket error:', event);
           cleanupBrowserMidi();
           setIsPlaying(false);
         };
@@ -783,7 +869,10 @@ const ScorePage: React.FC = () => {
                       Audio
                     </button>
                     <button
-                      onClick={() => setInputType('midi')}
+                      onClick={() => {
+                        setInputType('midi');
+                        void requestBrowserMidiAccess(false);
+                      }}
                       className={`px-3 py-1.5 text-xs font-medium transition-colors border-l border-gray-200
                         ${inputType === 'midi'
                           ? 'bg-gray-800 text-white'
@@ -793,17 +882,30 @@ const ScorePage: React.FC = () => {
                     </button>
                   </div>
 
-                  {inputType === 'midi' && midiInputs.length > 1 && (
-                    <select
-                      value={selectedMidiInput}
-                      onChange={(e) => setSelectedMidiInput(e.target.value)}
-                      className="appearance-none bg-gray-50 text-gray-700 text-xs rounded-full px-3 py-1.5
-                        border border-gray-200 focus:outline-none focus:border-gray-300 cursor-pointer max-w-[180px]"
-                    >
-                      {midiInputs.map((input) => (
-                        <option key={input.id} value={input.id}>{input.name}</option>
-                      ))}
-                    </select>
+                  {inputType === 'midi' && (
+                    <>
+                      <select
+                        value={selectedMidiInput}
+                        onChange={(e) => setSelectedMidiInput(e.target.value)}
+                        disabled={midiInputs.length === 0}
+                        className="appearance-none bg-gray-50 text-gray-700 text-xs rounded-full px-3 py-1.5
+                          border border-gray-200 focus:outline-none focus:border-gray-300 cursor-pointer max-w-[180px]
+                          disabled:text-gray-400 disabled:cursor-not-allowed"
+                      >
+                        {midiInputs.length === 0 ? (
+                          <option value="">No MIDI input</option>
+                        ) : (
+                          midiInputs.map((input) => (
+                            <option key={input.id} value={input.id}>{input.name}</option>
+                          ))
+                        )}
+                      </select>
+                      {midiInputError && (
+                        <span className="text-[10px] text-rose-500 max-w-[220px] truncate" title={midiInputError}>
+                          {midiInputError}
+                        </span>
+                      )}
+                    </>
                   )}
 
                   {inputType && (
