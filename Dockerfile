@@ -19,7 +19,7 @@ WORKDIR /app/backend
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
     && pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir "git+https://github.com/pymatchmaker/matchmaker.git@8c3b981"
+    && pip install --no-cache-dir "git+https://github.com/pymatchmaker/matchmaker.git@47c23b8"
 RUN mkdir -p uploads
 COPY backend/app/ ./app/
 
